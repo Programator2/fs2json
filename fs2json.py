@@ -48,7 +48,8 @@ def _walktree(top):
     '''recursively descend the directory tree rooted at top,
        calling the callback function for each regular file'''
 
-    for i, f in enumerate(os.listdir(top)):
+    i = 0
+    for f in os.listdir(top):
         pathname = os.path.join(top, f)
         try:
             info, isdir, isreg = get_json(f, pathname)
@@ -69,6 +70,7 @@ def _walktree(top):
             print(']}', end='')
         else:
             print(info, end='')
+        i += 1
 
 
 def walktree(root):
