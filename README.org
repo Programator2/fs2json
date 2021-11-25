@@ -1,0 +1,45 @@
+* Usage
+
+This script generates JSON structure of a file system.
+
+: ./fs2json.sh <root> <output>
+
+- =root= :: start at this directory
+- =output= :: file to export compressed json (should end with =.json.zst=
+
+* Output example
+
+#+begin_src js
+{
+  "name": "vmlinuz",
+  "ino": 22,
+  "dev": 2049,
+  "nlink": 1,
+  "uid": 0,
+  "gid": 0,
+  "size": 27,
+  "atime": 1637006401.1373794,
+  "mtime": 1637006401.1373794,
+  "ctime": 1637006401.1373794,
+  "ifsock": 0,
+  "iflnk": 1,
+  "ifblk": 0,
+  "isreg": 0,
+  "ifdir": 0,
+  "ifchr": 0,
+  "ififo": 0,
+  "isuid": 0,
+  "isgid": 0,
+  "isvtx": 0,
+  "irusr": 1,
+  "iwusr": 1,
+  "ixusr": 1,
+  "irgrp": 1,
+  "iwgrp": 1,
+  "ixgrp": 1,
+  "iroth": 1,
+  "iwoth": 1,
+  "ixoth": 1,
+  "children": [...]
+}
+#+end_src
