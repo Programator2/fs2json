@@ -4,7 +4,7 @@ import os
 from stat import *
 import json
 import sys
-from db import Database
+from fs2json.db import Database
 
 
 def get_dentry(filename, path):
