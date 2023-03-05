@@ -96,7 +96,10 @@ class DatabaseRead:
                 'SELECT rowid FROM fs WHERE parent = ? AND name = ?',
                 (current_folder, e),
             )
-            current_folder = res.fetchone()[0]
+            if (row := res.fetchone()) is None:
+                # Directory does not exist
+                return tuple()
+            current_folder = row[0]
 
         return tuple()
 
