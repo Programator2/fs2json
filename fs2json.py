@@ -88,4 +88,5 @@ def walktree(root):
     print()
 
 
-walktree(sys.argv[1])
+if __name__ == '__main__':
+    walktree(sys.argv[1])

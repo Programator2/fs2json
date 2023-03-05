@@ -54,6 +54,7 @@ def walktree(root: str, db: Database):
         _walktree(root, parent)
 
 
-db = Database('fs.db')
-walktree(sys.argv[1], db)
-db.close()
+if __name__ == '__main__':
+    db = Database('fs.db')
+    walktree(sys.argv[1], db)
+    db.close()
