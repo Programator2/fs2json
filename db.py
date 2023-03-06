@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import sqlite3
 from collections import namedtuple
+import pwd
+import grp
 
 
 Inode = namedtuple(
@@ -35,6 +37,15 @@ class Database:
     def create_db(self):
         self.cur.execute(
             "CREATE TABLE IF NOT EXISTS fs(parent INTEGER, name TEXT, ino INTEGER, dev INTEGER, nlink INTEGER, uid INTEGER, gid INTEGER, size INTEGER, atime INTEGER, mtime INTEGER, ctime INTEGER, type INTEGER, mode INTEGER)"
+        )
+        self.cur.execute(
+            "CREATE TABLE IF NOT EXISTS users(name TEXT, uid INTEGER PRIMARY KEY, gid INTEGER)"
+        )
+        self.cur.execute(
+            "CREATE TABLE IF NOT EXISTS groups(name TEXT, gid INTEGER PRIMARY KEY)"
+        )
+        self.cur.execute(
+            "CREATE TABLE IF NOT EXISTS membership(uid INTEGER, gid INTEGER)"
         )
 
     def insert_dentry(
@@ -76,6 +87,20 @@ class Database:
             ),
         )
         return self.cur.lastrowid
+
+    def insert_unix_database(self):
+        """Insert unix users and group information into the database.
+
+        This should be called just once. The method doesn't check this.
+        """
+        users = pwd.getpwall()
+        for u in users:
+            self.cur.execute('INSERT INTO users VALUES(?, ?, ?)', (u.pw_name, u.pw_uid, u.pw_gid))
+        groups = grp.getgrall()
+        for g in groups:
+            self.cur.execute('INSERT INTO groups VALUES(?, ?)', (g.gr_name, g.gr_gid))
+            for username in g.gr_mem:
+                self.cur.execute("INSERT INTO membership SELECT uid, '?' FROM users WHERE name = ?", (g.gr_gid, username))
 
     def close(self):
         self.cur.execute('END TRANSACTION')
