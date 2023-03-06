@@ -1,8 +1,17 @@
 #!/usr/bin/env python3
+"""Filesystem database in sqlite format.
+
+Doesn't support updating, database has to be recreated everytime.
+"""
 import sqlite3
 from collections import namedtuple
-import pwd
-import grp
+import os
+
+if os.name == 'posix':
+    import pwd
+    import grp
+from itertools import chain
+from pprint import pprint
 
 
 Inode = namedtuple(
@@ -26,6 +35,8 @@ Inode = namedtuple(
 
 
 class Database:
+    """Creation of the database."""
+
     def __init__(self, path):
         self.con = sqlite3.connect(path, isolation_level=None)
         self.cur = self.con.cursor()
@@ -119,6 +130,8 @@ class Database:
 
 
 class DatabaseRead:
+    """Reading support from the database."""
+
     def __init__(self, path):
         self.con = sqlite3.connect(path)
         self.cur = self.con.cursor()
@@ -183,11 +196,62 @@ class DatabaseRead:
         return tuple()
 
     def get_owner(self, path: str) -> int:
+        """Return owner UID of a file located at `path`."""
         info = self.search_path(path)
         return info.uid
 
     def get_children(self, path: str) -> list[Inode]:
+        """Return a list of `Inode` data contained in a directory at `path`."""
         return self.search_path(path, children=True)
+
+    def _get_membership(self, uid: int) -> list[int]:
+        """Return a list of group IDs for user with a give `uid`.
+
+        This includes user's main group and also supplementary groups.
+        """
+        groups = []
+        res = self.cur.execute(
+            'SELECT gid FROM users WHERE uid = ?',
+            (uid,),
+        )
+        gid = res.fetchall()
+        res = self.cur.execute(
+            'SELECT gid FROM membership WHERE uid = ?',
+            (uid,),
+        )
+        supplementary = res.fetchall()
+        return list(chain(*gid, *supplementary))
+
+    def _has_permission(
+        self, path: str, uid: int, owner: int, group: int, others: int
+    ) -> bool:
+        """Check if file at `path` has permissions for user with `uid`.
+
+        :param owner: permission from `stat` module compared when user is owner
+        of the file.
+        :param group: permission from `stat` module compared when user is member
+        of the file group.
+        :param others: permission from `stat` module compared otherwise.
+        """
+        inode = self.search_path(path)
+        if inode.uid == uid:
+            return bool(inode.mode & owner)
+        elif inode.gid in self._get_membership(uid):
+            return bool(inode.mode & group)
+        else:
+            return bool(inode.mode & others)
+
+    def can_read(self, path: str, uid: int) -> bool:
+        """Check if file at `path` can be read by user with `uid`."""
+        return self._has_permission(
+            path, uid, stat.S_IRUSR, stat.S_IRGRP, stat.S_IROTH
+        )
+
+    def can_write(self, path: str, uid: int) -> bool:
+        """Check if file at `path` can be written by user with `uid`."""
+        return self._has_permission(
+            path, uid, stat.S_IWUSR, stat.S_IWGRP, stat.S_IWOTH
+        )
 
     def close(self):
         self.cur.close()
