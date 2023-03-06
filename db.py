@@ -1,5 +1,26 @@
 #!/usr/bin/env python3
 import sqlite3
+from collections import namedtuple
+
+
+Inode = namedtuple(
+    'Inode',
+    [
+        'parent',
+        'name',
+        'ino',
+        'dev',
+        'nlink',
+        'uid',
+        'gid',
+        'size',
+        'atime',
+        'mtime',
+        'ctime',
+        'type',
+        'mode',
+    ],
+)
 
 
 class Database:
@@ -78,8 +99,14 @@ class DatabaseRead:
         """
         return filter(lambda x: bool(x), path.split('/'))
 
-    def search_path(self, path: str) -> tuple:
-        """Return dentry object from the database if it exists."""
+    def search_path(
+        self, path: str, children=False
+    ) -> tuple | Inode | list[Inode]:
+        """Return inode metadata from the database if it exists.
+
+        :param path: Return inode metadata of object at this path.
+        :param children: If `True`, return children items of `path`.
+        """
         entries = tuple(self._create_path(path))
 
         # Root should be stored under rowid 1 in the database
@@ -87,11 +114,30 @@ class DatabaseRead:
 
         for i, e in enumerate(entries):
             if i == len(entries) - 1:
+                # Final path component
+                if not children:
+                    # Just return inode metadata about the last component
+                    res = self.cur.execute(
+                        'SELECT * FROM fs WHERE parent = ? AND name = ?',
+                        (current_folder, e),
+                    )
+                    row = res.fetchone()
+                    return Inode(*row)
+                # Get ID of the last component
                 res = self.cur.execute(
-                    'SELECT * FROM fs WHERE parent = ? AND name = ?',
+                    'SELECT rowid FROM fs WHERE parent = ? AND name = ?',
                     (current_folder, e),
                 )
-                return res.fetchone()
+                row = res.fetchone()
+                current_folder = row[0]
+                # Continue with contents of this directory
+                res = self.cur.execute(
+                    'SELECT * FROM fs WHERE parent = ?',
+                    (current_folder,),
+                )
+                rows = res.fetchall()
+                return [Inode(*x) for x in rows]
+
             res = self.cur.execute(
                 'SELECT rowid FROM fs WHERE parent = ? AND name = ?',
                 (current_folder, e),
@@ -102,6 +148,13 @@ class DatabaseRead:
             current_folder = row[0]
 
         return tuple()
+
+    def get_owner(self, path: str) -> int:
+        info = self.search_path(path)
+        return info.uid
+
+    def get_children(self, path: str) -> list[Inode]:
+        return self.search_path(path, children=True)
 
     def close(self):
         self.cur.close()
