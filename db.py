@@ -200,6 +200,10 @@ class DatabaseRead:
         info = self.search_path(path)
         return info.uid
 
+    def is_directory(self, path: str) -> bool:
+        info = self.search_path(path)
+        return stat.S_ISDIR(info.type)
+
     def get_children(self, path: str) -> list[Inode]:
         """Return a list of `Inode` data contained in a directory at `path`."""
         return self.search_path(path, children=True)
