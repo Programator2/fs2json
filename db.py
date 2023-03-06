@@ -227,9 +227,9 @@ class DatabaseRead:
         return list(chain(*gid, *supplementary))
 
     def _has_permission(
-        self, path: str, uid: int, owner: int, group: int, others: int
+        self, inode: Inode, uid: int, owner: int, group: int, others: int
     ) -> bool:
-        """Check if file at `path` has permissions for user with `uid`.
+        """Check if `inode` has permissions for user with `uid`.
 
         :param owner: permission from `stat` module compared when user is owner
         of the file.
@@ -237,7 +237,6 @@ class DatabaseRead:
         of the file group.
         :param others: permission from `stat` module compared otherwise.
         """
-        inode = self.search_path(path)
         if inode.uid == uid:
             return bool(inode.mode & owner)
         elif inode.gid in self._get_membership(uid):
@@ -245,16 +244,16 @@ class DatabaseRead:
         else:
             return bool(inode.mode & others)
 
-    def can_read(self, path: str, uid: int) -> bool:
-        """Check if file at `path` can be read by user with `uid`."""
+    def can_read(self, ino: Inode, uid: int) -> bool:
+        """Check if `ino` can be read by user with `uid`."""
         return self._has_permission(
-            path, uid, stat.S_IRUSR, stat.S_IRGRP, stat.S_IROTH
+            ino, uid, stat.S_IRUSR, stat.S_IRGRP, stat.S_IROTH
         )
 
-    def can_write(self, path: str, uid: int) -> bool:
-        """Check if file at `path` can be written by user with `uid`."""
+    def can_write(self, ino: Inode, uid: int) -> bool:
+        """Check if `ino` can be written by user with `uid`."""
         return self._has_permission(
-            path, uid, stat.S_IWUSR, stat.S_IWGRP, stat.S_IWOTH
+            ino, uid, stat.S_IWUSR, stat.S_IWGRP, stat.S_IWOTH
         )
 
     def close(self):
