@@ -95,12 +95,20 @@ class Database:
         """
         users = pwd.getpwall()
         for u in users:
-            self.cur.execute('INSERT INTO users VALUES(?, ?, ?)', (u.pw_name, u.pw_uid, u.pw_gid))
+            self.cur.execute(
+                'INSERT INTO users VALUES(?, ?, ?)',
+                (u.pw_name, u.pw_uid, u.pw_gid),
+            )
         groups = grp.getgrall()
         for g in groups:
-            self.cur.execute('INSERT INTO groups VALUES(?, ?)', (g.gr_name, g.gr_gid))
+            self.cur.execute(
+                'INSERT INTO groups VALUES(?, ?)', (g.gr_name, g.gr_gid)
+            )
             for username in g.gr_mem:
-                self.cur.execute("INSERT INTO membership SELECT uid, '?' FROM users WHERE name = ?", (g.gr_gid, username))
+                self.cur.execute(
+                    f"INSERT INTO membership SELECT uid, '{g.gr_gid}' FROM users WHERE name = ?",
+                    (username,),
+                )
 
     def close(self):
         self.cur.execute('END TRANSACTION')

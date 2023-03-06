@@ -52,9 +52,3 @@ def walktree(root: str, db: Database):
     parent = db.insert_dentry(None, *data)
     if isdir:
         _walktree(root, parent)
-
-
-if __name__ == '__main__':
-    db = Database('fs.db')
-    walktree(sys.argv[1], db)
-    db.close()
