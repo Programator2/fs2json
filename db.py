@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Filesystem database in sqlite format.
 
 Doesn't support updating, database has to be recreated everytime.

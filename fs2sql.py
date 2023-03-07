@@ -1,4 +1,3 @@
-#!/usr/bin/python3
 from os import stat, listdir
 import os
 from stat import *
