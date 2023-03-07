@@ -5,6 +5,7 @@ Doesn't support updating, database has to be recreated everytime.
 import sqlite3
 from collections import namedtuple
 import os
+import stat
 
 if os.name == 'posix':
     import pwd
