@@ -36,13 +36,24 @@ Inode = namedtuple(
 class Database:
     """Creation of the database."""
 
-    def __init__(self, path):
+    def __init__(self, path: str, drop: bool = False):
         self.con = sqlite3.connect(path, isolation_level=None)
         self.cur = self.con.cursor()
+        if drop:
+            self.drop_db()
         self.create_db()
         self.cur.execute('PRAGMA synchronous = OFF')
         self.cur.execute('PRAGMA journal_mode = MEMORY')
         self.cur.execute('BEGIN TRANSACTION')
+
+    def drop_db(self):
+        self.cur.executescript(
+            """DROP TABLE IF EXISTS fs;
+            DROP TABLE IF EXISTS users;
+            DROP TABLE IF EXISTS groups;
+            DROP TABLE IF EXISTS membership;
+            """
+        )
 
     def create_db(self):
         self.cur.execute(
