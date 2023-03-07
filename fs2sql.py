@@ -3,7 +3,7 @@ import os
 from stat import *
 import json
 import sys
-from fs2json.db import Database
+from db import Database
 
 
 def get_dentry(filename, path):
@@ -25,7 +25,7 @@ def get_dentry(filename, path):
     return (data, bool(S_ISDIR(s.st_mode)), bool(S_ISREG(s.st_mode)))
 
 
-def _walktree(top: str, parent: int):
+def _walktree(top: str, parent: int, db: Database):
     '''Recursively descend the directory tree rooted at top, inserting dentries
     into the database.
     '''
@@ -41,7 +41,7 @@ def _walktree(top: str, parent: int):
         new_parent = db.insert_dentry(parent, *data)
 
         if isdir:
-            _walktree(pathname, new_parent)
+            _walktree(pathname, new_parent, db)
 
 
 def walktree(root: str, db: Database):
@@ -50,4 +50,4 @@ def walktree(root: str, db: Database):
     )
     parent = db.insert_dentry(None, *data)
     if isdir:
-        _walktree(root, parent)
+        _walktree(root, parent, db)
