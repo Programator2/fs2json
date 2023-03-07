@@ -179,6 +179,9 @@ class DatabaseRead:
                         (current_folder, e),
                     )
                     row = res.fetchone()
+                    if row is None:
+                        # path doesn't exist
+                        return tuple()
                     return Inode(*row)
                 # Get ID of the last component
                 res = self.cur.execute(
@@ -186,6 +189,9 @@ class DatabaseRead:
                     (current_folder, e),
                 )
                 row = res.fetchone()
+                if row is None:
+                    # path doesn't exist
+                    return tuple()
                 current_folder = row[0]
                 # Continue with contents of this directory
                 res = self.cur.execute(
@@ -212,7 +218,11 @@ class DatabaseRead:
         return info.uid
 
     def is_directory(self, path: str) -> bool:
+        """Return `True` if `path` points to a directory. If the `path` doesn't
+        exist, return `False`."""
         info = self.search_path(path)
+        if not info:
+            return False
         return stat.S_ISDIR(info.type)
 
     def get_children(self, path: str) -> list[Inode]:
