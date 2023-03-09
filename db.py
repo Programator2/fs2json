@@ -157,8 +157,8 @@ class DatabaseRead:
         return filter(lambda x: bool(x), path.split('/'))
 
     def search_path(
-        self, path: str, children=False
-    ) -> tuple | Inode | list[Inode]:
+        self, path: str, children: bool = False, number: bool = False
+    ) -> tuple | Inode | list[Inode] | int:
         """Return inode metadata from the database if it exists.
 
         :param path: Return inode metadata of object at this path.
@@ -193,6 +193,14 @@ class DatabaseRead:
                     # path doesn't exist
                     return tuple()
                 current_folder = row[0]
+                if number:
+                    # Get just the number of items
+                    res = self.cur.execute(
+                        'SELECT COUNT(*) FROM fs WHERE parent = ?',
+                        (current_folder,),
+                    )
+                    row = res.fetchone()
+                    return row[0]
                 # Continue with contents of this directory
                 res = self.cur.execute(
                     'SELECT * FROM fs WHERE parent = ?',
@@ -228,6 +236,10 @@ class DatabaseRead:
     def get_children(self, path: str) -> list[Inode]:
         """Return a list of `Inode` data contained in a directory at `path`."""
         return self.search_path(path, children=True)
+
+    def get_num_children(self, path: str) -> int:
+        """Return number of items in folder at `path`."""
+        return self.search_path(path, children=True, number=True)
 
     def _get_membership(self, uid: int) -> list[int]:
         """Return a list of group IDs for user with a give `uid`.
