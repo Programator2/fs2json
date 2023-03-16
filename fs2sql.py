@@ -8,6 +8,9 @@ from db import Database
 
 def get_dentry(filename, path):
     s = stat(path, follow_symlinks=False)
+    selinux = os.getxattr(path, 'security.selinux')
+    selinux = selinux.split(':')
+    assert(len(selinux) == 4)
     data = (
         filename,
         s.st_ino,
@@ -21,6 +24,7 @@ def get_dentry(filename, path):
         s.st_ctime,
         S_IFMT(s.st_mode),
         S_IMODE(s.st_mode),
+        *selinux
     )
     return (data, bool(S_ISDIR(s.st_mode)), bool(S_ISREG(s.st_mode)))
 

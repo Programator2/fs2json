@@ -30,6 +30,10 @@ Inode = namedtuple(
         'ctime',
         'type',
         'mode',
+        'selinux_user',
+        'selinux_role',
+        'selinux_type',
+        'selinux_sensitivity',
     ],
 )
 
@@ -58,7 +62,7 @@ class Database:
 
     def create_db(self):
         self.cur.execute(
-            "CREATE TABLE IF NOT EXISTS fs(parent INTEGER, name TEXT, ino INTEGER, dev INTEGER, nlink INTEGER, uid INTEGER, gid INTEGER, size INTEGER, atime INTEGER, mtime INTEGER, ctime INTEGER, type INTEGER, mode INTEGER)"
+            "CREATE TABLE IF NOT EXISTS fs(parent INTEGER, name TEXT, ino INTEGER, dev INTEGER, nlink INTEGER, uid INTEGER, gid INTEGER, size INTEGER, atime INTEGER, mtime INTEGER, ctime INTEGER, type INTEGER, mode INTEGER, selinux_user TEXT, selinux_role TEXT, selinux_type TEXT, selinux_sensitivity TEXT)"
         )
         self.cur.execute(
             "CREATE TABLE IF NOT EXISTS users(name TEXT, uid INTEGER PRIMARY KEY, gid INTEGER)"
@@ -85,13 +89,17 @@ class Database:
         ctime,
         _type,
         mode,
+        selinux_user,
+        selinux_role,
+        selinux_type,
+        selinux_sensitivity
     ):
         """Execute INSERT statement for a dentry.
 
         :returns: rowid of inserted row
         """
         self.cur.execute(
-            'INSERT INTO fs VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'INSERT INTO fs VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
                 parent,
                 name,
@@ -106,6 +114,10 @@ class Database:
                 ctime,
                 _type,
                 mode,
+                selinux_user,
+                selinux_role,
+                selinux_type,
+                selinux_sensitivity
             ),
         )
         return self.cur.lastrowid
@@ -135,6 +147,7 @@ class Database:
     def close(self):
         self.cur.execute('END TRANSACTION')
         self.cur.execute('CREATE INDEX parent_index ON fs (parent)')
+        self.cur.execute('CREATE INDEX selinux_type_index ON fs (selinux_type)')
         self.con.commit()
         self.cur.close()
         self.con.close()
