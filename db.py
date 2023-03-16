@@ -34,6 +34,7 @@ Inode = namedtuple(
         'selinux_role',
         'selinux_type',
         'selinux_sensitivity',
+        'selinux_category',
     ],
 )
 
@@ -62,7 +63,7 @@ class Database:
 
     def create_db(self):
         self.cur.execute(
-            "CREATE TABLE IF NOT EXISTS fs(parent INTEGER, name TEXT, ino INTEGER, dev INTEGER, nlink INTEGER, uid INTEGER, gid INTEGER, size INTEGER, atime INTEGER, mtime INTEGER, ctime INTEGER, type INTEGER, mode INTEGER, selinux_user TEXT, selinux_role TEXT, selinux_type TEXT, selinux_sensitivity TEXT)"
+            "CREATE TABLE IF NOT EXISTS fs(parent INTEGER, name TEXT, ino INTEGER, dev INTEGER, nlink INTEGER, uid INTEGER, gid INTEGER, size INTEGER, atime INTEGER, mtime INTEGER, ctime INTEGER, type INTEGER, mode INTEGER, selinux_user TEXT, selinux_role TEXT, selinux_type TEXT, selinux_sensitivity TEXT, selinux_category TEXT)"
         )
         self.cur.execute(
             "CREATE TABLE IF NOT EXISTS users(name TEXT, uid INTEGER PRIMARY KEY, gid INTEGER)"
@@ -92,14 +93,15 @@ class Database:
         selinux_user,
         selinux_role,
         selinux_type,
-        selinux_sensitivity
+        selinux_sensitivity,
+        selinux_category
     ):
         """Execute INSERT statement for a dentry.
 
         :returns: rowid of inserted row
         """
         self.cur.execute(
-            'INSERT INTO fs VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'INSERT INTO fs VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
                 parent,
                 name,
@@ -117,7 +119,8 @@ class Database:
                 selinux_user,
                 selinux_role,
                 selinux_type,
-                selinux_sensitivity
+                selinux_sensitivity,
+                selinux_category
             ),
         )
         return self.cur.lastrowid

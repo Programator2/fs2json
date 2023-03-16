@@ -8,9 +8,17 @@ from db import Database
 
 def get_dentry(filename, path):
     s = stat(path, follow_symlinks=False)
-    selinux = os.getxattr(path, 'security.selinux')
-    selinux = selinux.split(':')
-    assert(len(selinux) == 4)
+    try:
+        selinux = os.getxattr(path, 'security.selinux').rstrip(b'\x00').decode('utf-8')
+        selinux = selinux.split(':')
+        if len(selinux) not in (4, 5):
+            print('Assertion failed:', selinux)
+            sys.exit(-1)
+        if len(selinux) == 4:
+            selinux.append(None)
+    except OSError:
+        # Operation not supported (/proc fs etc.)
+        selinux = [None] * 5
     data = (
         filename,
         s.st_ino,
