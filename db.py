@@ -6,6 +6,7 @@ import sqlite3
 from collections import namedtuple
 import os
 import stat
+from collections.abc import Iterable
 
 if os.name == 'posix':
     import pwd
@@ -304,6 +305,27 @@ class DatabaseRead:
         return self._has_permission(
             ino, uid, stat.S_IWUSR, stat.S_IWGRP, stat.S_IWOTH
         )
+
+    def get_paths_by_selinux_type(self, types: Iterable[str]) -> list[str]:
+        """Return list of paths that match types listed in `_types`."""
+        expr = (f'selinux_type == "{t}"' for t in types)
+        select = f'''WITH RECURSIVE child AS
+(
+  SELECT rowid AS original, rowid, parent, name
+  FROM fs
+  WHERE ({" OR ".join(expr)})
+
+  UNION ALL
+
+  SELECT original, fs.rowid, fs.parent, fs.name || '/' || child.name
+  FROM fs, child
+  WHERE child.parent = fs.rowid
+)
+SELECT name
+From child
+WHERE rowid = 1'''
+        res = self.cur.execute(select)
+        return list(chain.from_iterable(res.fetchall()))
 
     def close(self):
         self.cur.close()
