@@ -7,6 +7,7 @@ from collections import namedtuple
 import os
 import stat
 from collections.abc import Iterable
+from helpers import construct_selinux_context, selinux_check_access
 
 if os.name == 'posix':
     import pwd
@@ -40,7 +41,47 @@ Inode = namedtuple(
 )
 
 
-class Database:
+class DatabaseCommon:
+    def get_paths_by_selinux_type(self, types: Iterable[str]):
+        """Return list of paths that match types listed in `_types`."""
+        expr = (f'selinux_type == "{t}"' for t in types)
+        select = f'''WITH RECURSIVE child AS
+(
+  SELECT rowid AS original, rowid, parent, name, type, selinux_user, selinux_role, selinux_type, selinux_sensitivity, selinux_category
+  FROM fs
+  WHERE ({" OR ".join(expr)})
+
+  UNION ALL
+
+  SELECT original, fs.rowid, fs.parent, fs.name || '/' || child.name, child.type, child.selinux_user, child.selinux_role, child.selinux_type, child.selinux_sensitivity, child.selinux_category
+  FROM fs, child
+  WHERE child.parent = fs.rowid
+)
+SELECT original, name, type, selinux_user, selinux_role, selinux_type, selinux_sensitivity, selinux_category
+From child
+WHERE rowid = 1'''
+        res = self.cur.execute(select)
+        return res.fetchall()
+        return list(chain.from_iterable(res.fetchall()))
+
+    def get_case_id(self, case: str) -> int:
+        res = self.cur.execute(
+            'SELECT rowid FROM cases WHERE name = ?',
+            (case,),
+        )
+        row = res.fetchone()
+        return row[0]
+
+    def get_context_id(self, context: str) -> int:
+        res = self.cur.execute(
+            'SELECT rowid FROM contexts WHERE name = ?',
+            (context,),
+        )
+        row = res.fetchone()
+        return row[0]
+
+
+class Database(DatabaseCommon):
     """Creation of the database."""
 
     def __init__(self, path: str, drop: bool = False):
@@ -95,7 +136,7 @@ class Database:
         selinux_role,
         selinux_type,
         selinux_sensitivity,
-        selinux_category
+        selinux_category,
     ):
         """Execute INSERT statement for a dentry.
 
@@ -121,7 +162,7 @@ class Database:
                 selinux_role,
                 selinux_type,
                 selinux_sensitivity,
-                selinux_category
+                selinux_category,
             ),
         )
         return self.cur.lastrowid
@@ -148,10 +189,98 @@ class Database:
                     (username,),
                 )
 
+    def _prepare_accesses(self):
+        self.cur.execute(
+            "CREATE TABLE IF NOT EXISTS accesses(case_id INTEGER, subject_cid INTEGER, node_rowid INTEGER, read INTEGER, write INTEGER)"
+        )
+        self.cur.execute(
+            'CREATE INDEX IF NOT EXISTS case_index ON accesses (case_id)'
+        )
+        self.cur.execute("CREATE TABLE IF NOT EXISTS cases(name TEXT UNIQUE)")
+        self.cur.execute(
+            "CREATE TABLE IF NOT EXISTS contexts(name TEXT UNIQUE)"
+        )
+
+    def insert_selinux_accesses(
+        self,
+        case_name: str,
+        subject_context: str,
+        object_types: Iterable[str],
+        verbose: bool = False,
+    ):
+        """Fill accesses table in the database.
+
+        Fill a table with SELinux accesses from `subject_context` to all files
+        with types from `selinux_types`.
+
+        :param case_name: Name of the service that is examined. This will be
+        used as a unique value in the database.
+        :param subject_context: SELinux context of the subject.
+        :param object_types:SELinux types that will be searched in the database
+        and found files will be examined for read and write permissions from the
+        subject.
+        :param verbose: Turns on verbose output.
+        """
+        self._prepare_accesses()
+        self.cur.execute(
+            'INSERT INTO cases VALUES(?) ON CONFLICT DO NOTHING',
+            (case_name,),
+        )
+        case_id = self.get_case_id(case_name)
+        self.cur.execute(
+            'INSERT INTO contexts VALUES(?) ON CONFLICT DO NOTHING',
+            (subject_context,),
+        )
+        subject_cid = self.get_context_id(subject_context)
+        files = self.get_paths_by_selinux_type(object_types)
+        for (
+            rowid,
+            path,
+            _type,
+            selinux_user,
+            selinux_role,
+            selinux_type,
+            selinux_sensitivity,
+            selinux_category,
+        ) in files:
+            context = construct_selinux_context(
+                selinux_user,
+                selinux_role,
+                selinux_type,
+                selinux_sensitivity,
+                selinux_category,
+            )
+            is_dir = stat.S_ISDIR(_type)
+            _class = 'dir' if is_dir else 'file'
+            perms = ('read', 'write')
+            results = [
+                selinux_check_access(subject_context, context, _class, perm)
+                for perm in perms
+            ]
+            if verbose:
+                for perm, result in zip(perms, results):
+                    print(
+                        f'{subject_context}=>{context} {path} ({_class}:{perm})={result}'
+                    )
+            self.cur.execute(
+                'INSERT INTO accesses VALUES(?, ?, ?, ?, ?)',
+                (
+                    case_id,
+                    subject_cid,
+                    rowid,
+                    results[0],
+                    results[1],
+                ),
+            )
+
     def close(self):
         self.cur.execute('END TRANSACTION')
-        self.cur.execute('CREATE INDEX parent_index ON fs (parent)')
-        self.cur.execute('CREATE INDEX selinux_type_index ON fs (selinux_type)')
+        self.cur.execute(
+            'CREATE INDEX IF NOT EXISTS parent_index ON fs (parent)'
+        )
+        self.cur.execute(
+            'CREATE INDEX IF NOT EXISTS selinux_type_index ON fs (selinux_type)'
+        )
         self.con.commit()
         self.cur.close()
         self.con.close()
@@ -305,27 +434,6 @@ class DatabaseRead:
         return self._has_permission(
             ino, uid, stat.S_IWUSR, stat.S_IWGRP, stat.S_IWOTH
         )
-
-    def get_paths_by_selinux_type(self, types: Iterable[str]) -> list[str]:
-        """Return list of paths that match types listed in `_types`."""
-        expr = (f'selinux_type == "{t}"' for t in types)
-        select = f'''WITH RECURSIVE child AS
-(
-  SELECT rowid AS original, rowid, parent, name
-  FROM fs
-  WHERE ({" OR ".join(expr)})
-
-  UNION ALL
-
-  SELECT original, fs.rowid, fs.parent, fs.name || '/' || child.name
-  FROM fs, child
-  WHERE child.parent = fs.rowid
-)
-SELECT name
-From child
-WHERE rowid = 1'''
-        res = self.cur.execute(select)
-        return list(chain.from_iterable(res.fetchall()))
 
     def close(self):
         self.cur.close()
