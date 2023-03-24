@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-from os import stat, listdir
+from os import stat
 import os
 from stat import *
 import json
