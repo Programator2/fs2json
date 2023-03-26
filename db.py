@@ -456,6 +456,36 @@ class DatabaseRead(DatabaseCommon):
             ino, uid, stat.S_IWUSR, stat.S_IWGRP, stat.S_IWOTH
         )
 
+    def get_reference_accesses(self, case: str, contexts: Iterable[str]):
+        """
+        :param case: Name of the case from which to retrieve accesses.
+        :param contexts: Names of subject contexts which will be used to compare
+        accesses.
+        """
+        case_id = self.get_case_id(case)
+        context_ids = [self.get_context_id(c) for c in contexts]
+        expr = (f'subject_cid == "{c}"' for c in context_ids)
+        ret = self.cur.execute(
+            f"""WITH RECURSIVE child AS
+(
+SELECT accesses.case_id, accesses.node_rowid, accesses.subject_cid, accesses.read, accesses.write, cases.name AS case_name, contexts.name AS subject_context, fs.rowid, fs.parent, fs.name FROM accesses
+JOIN cases ON case_id = cases.rowid
+JOIN contexts ON subject_cid = contexts.rowid
+JOIN fs ON node_rowid = fs.rowid
+WHERE case_id = ? AND ({" OR ".join(expr)})
+
+UNION ALL
+
+SELECT case_id, node_rowid, subject_cid, read, write, case_name, subject_context, fs.rowid, fs.parent, fs.name || '/' || child.name
+FROM fs, child
+WHERE child.parent = fs.rowid
+)
+SELECT name AS path, read, write
+From child
+WHERE rowid = 1""",
+(case_id,))
+        return ret.fetchall()
+
     def close(self):
         self.cur.close()
         self.con.close()
