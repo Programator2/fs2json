@@ -307,7 +307,7 @@ WHERE rowid = 1"""
         self.con.close()
 
 
-class DatabaseRead:
+class DatabaseRead(DatabaseCommon):
     """Reading support from the database."""
 
     def __init__(self, path):
