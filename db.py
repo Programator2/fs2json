@@ -70,6 +70,7 @@ WHERE rowid = 1'''
             (case,),
         )
         row = res.fetchone()
+        # TODO: Handle row being `None`
         return row[0]
 
     def get_context_id(self, context: str) -> int:
@@ -78,6 +79,7 @@ WHERE rowid = 1'''
             (context,),
         )
         row = res.fetchone()
+        # TODO: Handle row being `None`
         return row[0]
 
 
