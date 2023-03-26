@@ -7,7 +7,7 @@ from collections import namedtuple
 import os
 import stat
 from collections.abc import Iterable
-from helpers import construct_selinux_context, selinux_check_access
+from .helpers import construct_selinux_context, selinux_check_access
 
 if os.name == 'posix':
     import pwd
