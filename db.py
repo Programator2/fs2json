@@ -200,6 +200,25 @@ class Database(DatabaseCommon):
         self.cur.execute(
             "CREATE TABLE IF NOT EXISTS contexts(name TEXT UNIQUE)"
         )
+        self.cur.execute(
+            """CREATE VIEW IF NOT EXISTS translated_accesses AS
+WITH RECURSIVE child AS
+(
+SELECT accesses.case_id, accesses.node_rowid, accesses.subject_cid, accesses.read, accesses.write, cases.name AS case_name, contexts.name AS subject_context, fs.rowid, fs.parent, fs.name FROM accesses
+JOIN cases ON case_id = cases.rowid
+JOIN contexts ON subject_cid = contexts.rowid
+JOIN fs ON node_rowid = fs.rowid
+
+UNION ALL
+
+SELECT case_id, node_rowid, subject_cid, read, write, case_name, subject_context, fs.rowid, fs.parent, fs.name || '/' || child.name
+FROM fs, child
+WHERE child.parent = fs.rowid
+)
+SELECT case_id, node_rowid, subject_cid, read, write, case_name, subject_context, name AS path
+From child
+WHERE rowid = 1"""
+        )
 
     def insert_selinux_accesses(
         self,
