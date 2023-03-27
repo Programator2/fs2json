@@ -94,13 +94,65 @@ WHERE rowid = 1'''
         # TODO: Handle row being `None`
         return ret
 
+    def get_access(self, case_id: int, subject_cid: int, path_rowid: int) -> int | None:
+            res = self.cur.execute(
+                '''SELECT rowid FROM accesses WHERE
+                case_id = ? AND
+                subject_cid = ? AND
+                node_rowid = ?''',
+                (
+                    case_id,
+                    subject_cid,
+                    path_rowid,
+                ),
+            )
+            row = res.fetchone()
+            if row is None:
+                return None
+            return row[0]
 
-class Database(DatabaseCommon):
+    def get_children(self, parent_rowid: int) -> list[tuple[int, str]]:
+        res = self.cur.execute(
+            'SELECT rowid, name FROM fs WHERE parent = ?',
+            (parent_rowid,),
+        )
+        return res.fetchall()
+
+
+class DatabaseWriter(DatabaseCommon):
+    """Database with read-write support."""
+
+    def __init__(self, path: str):
+        self.con = sqlite3.connect(path, isolation_level=None)
+        self.cur = self.con.cursor()
+
+    def insert_access(self, case_id: int, subject_cid: int, path_rowid: int) -> int:
+            self.cur.execute(
+                'INSERT INTO accesses VALUES(?, ?, ?)',
+                (
+                    case_id,
+                    subject_cid,
+                    path_rowid,
+                ),
+            )
+            return self.cur.lastrowid
+
+    def insert_or_select_access(self, case_id: int, subject_cid: int, path_rowid: int) -> int:
+        if (rowid := self.get_access(case_id, subject_cid, path_rowid)) is None:
+            return self.insert_access(case_id, subject_cid, path_rowid)
+        return rowid
+
+    def close(self):
+        self.con.commit()
+        self.cur.close()
+        self.con.close()
+
+
+class DatabaseCreator(DatabaseWriter):
     """Creation of the database."""
 
     def __init__(self, path: str, drop: bool = False):
-        self.con = sqlite3.connect(path, isolation_level=None)
-        self.cur = self.con.cursor()
+        super().__init__(path)
         if drop:
             self.drop_db()
         self.create_db()
@@ -355,9 +407,7 @@ WHERE rowid = 1"""
         self.cur.execute(
             'CREATE INDEX IF NOT EXISTS selinux_type_index ON fs (selinux_type)'
         )
-        self.con.commit()
-        self.cur.close()
-        self.con.close()
+        super().close()
 
 
 class DatabaseRead(DatabaseCommon):
