@@ -82,6 +82,18 @@ WHERE rowid = 1'''
         # TODO: Handle row being `None`
         return row[0]
 
+    def get_operations_id(self, operations: Iterable[str]) -> list[int]:
+        ret = []
+        for operation in operations:
+            res = self.cur.execute(
+                'SELECT rowid FROM operations WHERE operation = ?',
+                (operation,),
+            )
+            row = res.fetchone()
+            ret.append(row[0])
+        # TODO: Handle row being `None`
+        return ret
+
 
 class Database(DatabaseCommon):
     """Creation of the database."""
@@ -193,31 +205,60 @@ class Database(DatabaseCommon):
 
     def _prepare_accesses(self):
         self.cur.execute(
-            "CREATE TABLE IF NOT EXISTS accesses(case_id INTEGER, subject_cid INTEGER, node_rowid INTEGER, read INTEGER, write INTEGER)"
+            """CREATE TABLE IF NOT EXISTS accesses (
+            case_id INTEGER,
+            subject_cid INTEGER,
+            node_rowid INTEGER,
+            UNIQUE (case_id, subject_cid, node_rowid) ON CONFLICT IGNORE
+            )"""
+        )
+        self.cur.execute(
+            """CREATE TABLE IF NOT EXISTS results (
+            access_id INTEGER,
+            operation_id INTEGER,
+            reference_result INTEGER,
+            medusa_result INTEGER,
+            PRIMARY KEY (access_id, operation_id)
+            )"""
         )
         self.cur.execute(
             'CREATE INDEX IF NOT EXISTS case_index ON accesses (case_id)'
+        )
+        self.cur.execute(
+            'CREATE INDEX IF NOT EXISTS access_index ON results (access_id)'
         )
         self.cur.execute("CREATE TABLE IF NOT EXISTS cases(name TEXT UNIQUE)")
         self.cur.execute(
             "CREATE TABLE IF NOT EXISTS contexts(name TEXT UNIQUE)"
         )
         self.cur.execute(
+            "CREATE TABLE IF NOT EXISTS operations(operation TEXT UNIQUE)"
+        )
+        self.cur.executemany(
+            'INSERT INTO operations VALUES(?) ON CONFLICT DO NOTHING',
+            (('read',), ('write',)),
+        )
+        self.cur.execute(
             """CREATE VIEW IF NOT EXISTS translated_accesses AS
 WITH RECURSIVE child AS
 (
-SELECT accesses.case_id, accesses.node_rowid, accesses.subject_cid, accesses.read, accesses.write, cases.name AS case_name, contexts.name AS subject_context, fs.rowid, fs.parent, fs.name FROM accesses
+SELECT 	accesses.case_id, accesses.node_rowid, accesses.subject_cid,
+		cases.name AS case_name, contexts.name AS subject_context,
+		fs.rowid, fs.parent, fs.name, operation,
+		results.reference_result, results.medusa_result FROM accesses
 JOIN cases ON case_id = cases.rowid
 JOIN contexts ON subject_cid = contexts.rowid
 JOIN fs ON node_rowid = fs.rowid
+JOIN results ON accesses.ROWID = results.access_id
+JOIN operations ON results.operation_id = operations.rowid
 
 UNION ALL
 
-SELECT case_id, node_rowid, subject_cid, read, write, case_name, subject_context, fs.rowid, fs.parent, fs.name || '/' || child.name
+SELECT case_id, node_rowid, subject_cid, case_name, subject_context, fs.rowid, fs.parent, fs.name || '/' || child.name, operation, reference_result, medusa_result
 FROM fs, child
 WHERE child.parent = fs.rowid
 )
-SELECT case_id, node_rowid, subject_cid, read, write, case_name, subject_context, name AS path
+SELECT case_id, case_name, subject_cid, subject_context, node_rowid, name AS path, operation, reference_result, medusa_result
 From child
 WHERE rowid = 1"""
         )
@@ -254,6 +295,8 @@ WHERE rowid = 1"""
         )
         subject_cid = self.get_context_id(subject_context)
         files = self.get_paths_by_selinux_type(object_types)
+        perms = ('read', 'write')
+        perms_id = self.get_operations_id(perms)
         for (
             rowid,
             path,
@@ -273,7 +316,7 @@ WHERE rowid = 1"""
             )
             is_dir = stat.S_ISDIR(_type)
             _class = 'dir' if is_dir else 'file'
-            perms = ('read', 'write')
+
             results = [
                 selinux_check_access(subject_context, context, _class, perm)
                 for perm in perms
@@ -284,15 +327,25 @@ WHERE rowid = 1"""
                         f'{subject_context}=>{context} {path} ({_class}:{perm})={result}'
                     )
             self.cur.execute(
-                'INSERT INTO accesses VALUES(?, ?, ?, ?, ?)',
+                'INSERT INTO accesses VALUES(?, ?, ?)',
                 (
                     case_id,
                     subject_cid,
                     rowid,
-                    results[0],
-                    results[1],
                 ),
             )
+
+            access_id = self.cur.lastrowid
+
+            for perm_id, result in zip(perms_id, results):
+                self.cur.execute(
+                    'INSERT INTO results VALUES(?, ?, ?, null)',
+                    (
+                        access_id,
+                        perm_id,
+                        result,
+                    ),
+                )
 
     def close(self):
         self.cur.execute('END TRANSACTION')
@@ -483,7 +536,8 @@ WHERE child.parent = fs.rowid
 SELECT name AS path, read, write
 From child
 WHERE rowid = 1""",
-(case_id,))
+            (case_id,),
+        )
         return ret.fetchall()
 
     def close(self):
