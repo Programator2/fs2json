@@ -118,6 +118,23 @@ WHERE rowid = 1'''
         )
         return res.fetchall()
 
+    def get_specific_child(self, parent_rowid: int, name: str) -> int | None:
+        """Get child in a folder.
+
+        :param parent_rowid: rowid of parent directory from fs table.
+        :param name: name of the directory to search for.
+        """
+        res = self.cur.execute(
+            'SELECT rowid FROM fs WHERE parent = ? AND name = ?',
+            (parent_rowid, name),
+        )
+        row = res.fetchone()
+        if row is None:
+            # path doesn't exist
+            return None
+        return row[0]
+
+
 
 class DatabaseWriter(DatabaseCommon):
     """Database with read-write support."""
@@ -403,6 +420,9 @@ WHERE rowid = 1"""
         self.cur.execute('END TRANSACTION')
         self.cur.execute(
             'CREATE INDEX IF NOT EXISTS parent_index ON fs (parent)'
+        )
+        self.cur.execute(
+            'CREATE INDEX IF NOT EXISTS parent_name_index ON fs (parent, name)'
         )
         self.cur.execute(
             'CREATE INDEX IF NOT EXISTS selinux_type_index ON fs (selinux_type)'
