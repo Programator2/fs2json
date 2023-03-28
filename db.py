@@ -147,15 +147,49 @@ class DatabaseWriter(DatabaseCommon):
     def insert_access(
         self, case_id: int, subject_cid: int, path_rowid: int
     ) -> int:
+        self.cur.execute(
+            'INSERT INTO accesses VALUES(?, ?, ?)',
+            (
+                case_id,
+                subject_cid,
+                path_rowid,
+            ),
+        )
+        return self.cur.lastrowid
+
+    def insert_result(
+        self,
+        access_id: int,
+        perm_id: int,
+        result_ref: int | None,
+        result_med: int | None,
+    ) -> None:
+        if result_ref is None:
             self.cur.execute(
-                'INSERT INTO accesses VALUES(?, ?, ?)',
+                '''INSERT INTO results VALUES(?, ?, null, ?)
+                ON CONFLICT (access_id, operation_id)
+                DO UPDATE SET medusa_result = ?''',
                 (
-                    case_id,
-                    subject_cid,
-                    path_rowid,
+                    access_id,
+                    perm_id,
+                    result_med,
+                    result_med
                 ),
             )
-            return self.cur.lastrowid
+        elif result_med is None:
+            self.cur.execute(
+                '''INSERT INTO results VALUES(?, ?, ?, null)
+                ON CONFLICT (access_id, operation_id)
+                DO UPDATE SET reference_result = ?''',
+                (
+                    access_id,
+                    perm_id,
+                    result_ref,
+                    result_ref
+                ),
+            )
+        else:
+            raise Exception('One of the results has to be None.')
 
     def insert_or_select_access(
         self, case_id: int, subject_cid: int, path_rowid: int
@@ -443,14 +477,7 @@ WHERE rowid = 1"""
             access_id = self.cur.lastrowid
 
             for perm_id, result in zip(perms_id, results):
-                self.cur.execute(
-                    'INSERT INTO results VALUES(?, ?, ?, null)',
-                    (
-                        access_id,
-                        perm_id,
-                        result,
-                    ),
-                )
+                self.insert_result(access_id, perm_id, result, None)
 
     def close(self):
         self.cur.execute('END TRANSACTION')
