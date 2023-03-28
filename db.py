@@ -570,21 +570,39 @@ class DatabaseRead(DatabaseCommon):
         expr = (f'subject_cid == "{c}"' for c in context_ids)
         ret = self.cur.execute(
             f"""WITH RECURSIVE child AS
-(
-SELECT accesses.case_id, accesses.node_rowid, accesses.subject_cid, accesses.read, accesses.write, cases.name AS case_name, contexts.name AS subject_context, fs.rowid, fs.parent, fs.name FROM accesses
-JOIN cases ON case_id = cases.rowid
-JOIN contexts ON subject_cid = contexts.rowid
-JOIN fs ON node_rowid = fs.rowid
-WHERE case_id = ? AND ({" OR ".join(expr)})
-
-UNION ALL
-
-SELECT case_id, node_rowid, subject_cid, read, write, case_name, subject_context, fs.rowid, fs.parent, fs.name || '/' || child.name
-FROM fs, child
-WHERE child.parent = fs.rowid
-)
-SELECT name AS path, read, write
-From child
+  (SELECT accesses.case_id,
+          accesses.node_rowid,
+          accesses.subject_cid,
+          accesses.read,
+          accesses.write,
+          cases.name AS case_name,
+          contexts.name AS subject_context,
+          fs.rowid,
+          fs.parent,
+          fs.name
+   FROM accesses
+   JOIN cases ON case_id = cases.rowid
+   JOIN contexts ON subject_cid = contexts.rowid
+   JOIN fs ON node_rowid = fs.rowid
+   WHERE case_id = ?
+     AND ({" OR ".join(expr)})
+   UNION ALL SELECT case_id,
+                    node_rowid,
+                    subject_cid,
+                    READ,
+                    WRITE,
+                    case_name,
+                    subject_context,
+                    fs.rowid,
+                    fs.parent,
+                    fs.name || '/' || child.name
+   FROM fs,
+        child
+   WHERE child.parent = fs.rowid )
+SELECT name AS PATH,
+       READ,
+       WRITE
+FROM child
 WHERE rowid = 1""",
             (case_id,),
         )
