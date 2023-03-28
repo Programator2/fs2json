@@ -94,22 +94,24 @@ WHERE rowid = 1'''
         # TODO: Handle row being `None`
         return ret
 
-    def get_access(self, case_id: int, subject_cid: int, path_rowid: int) -> int | None:
-            res = self.cur.execute(
-                '''SELECT rowid FROM accesses WHERE
+    def get_access(
+        self, case_id: int, subject_cid: int, path_rowid: int
+    ) -> int | None:
+        res = self.cur.execute(
+            '''SELECT rowid FROM accesses WHERE
                 case_id = ? AND
                 subject_cid = ? AND
                 node_rowid = ?''',
-                (
-                    case_id,
-                    subject_cid,
-                    path_rowid,
-                ),
-            )
-            row = res.fetchone()
-            if row is None:
-                return None
-            return row[0]
+            (
+                case_id,
+                subject_cid,
+                path_rowid,
+            ),
+        )
+        row = res.fetchone()
+        if row is None:
+            return None
+        return row[0]
 
     def get_children(self, parent_rowid: int) -> list[tuple[int, str]]:
         res = self.cur.execute(
@@ -135,7 +137,6 @@ WHERE rowid = 1'''
         return row[0]
 
 
-
 class DatabaseWriter(DatabaseCommon):
     """Database with read-write support."""
 
@@ -143,7 +144,9 @@ class DatabaseWriter(DatabaseCommon):
         self.con = sqlite3.connect(path, isolation_level=None)
         self.cur = self.con.cursor()
 
-    def insert_access(self, case_id: int, subject_cid: int, path_rowid: int) -> int:
+    def insert_access(
+        self, case_id: int, subject_cid: int, path_rowid: int
+    ) -> int:
             self.cur.execute(
                 'INSERT INTO accesses VALUES(?, ?, ?)',
                 (
@@ -154,7 +157,9 @@ class DatabaseWriter(DatabaseCommon):
             )
             return self.cur.lastrowid
 
-    def insert_or_select_access(self, case_id: int, subject_cid: int, path_rowid: int) -> int:
+    def insert_or_select_access(
+        self, case_id: int, subject_cid: int, path_rowid: int
+    ) -> int:
         if (rowid := self.get_access(case_id, subject_cid, path_rowid)) is None:
             return self.insert_access(case_id, subject_cid, path_rowid)
         return rowid
@@ -310,25 +315,56 @@ class DatabaseCreator(DatabaseWriter):
         self.cur.execute(
             """CREATE VIEW IF NOT EXISTS translated_accesses AS
 WITH RECURSIVE child AS
-(
-SELECT 	accesses.case_id, accesses.node_rowid, accesses.subject_cid,
-		cases.name AS case_name, contexts.name AS subject_context,
-		fs.rowid, fs.parent, fs.name, operation,
-		results.reference_result, results.medusa_result FROM accesses
-JOIN cases ON case_id = cases.rowid
-JOIN contexts ON subject_cid = contexts.rowid
-JOIN fs ON node_rowid = fs.rowid
-JOIN results ON accesses.ROWID = results.access_id
-JOIN operations ON results.operation_id = operations.rowid
-
-UNION ALL
-
-SELECT case_id, node_rowid, subject_cid, case_name, subject_context, fs.rowid, fs.parent, fs.name || '/' || child.name, operation, reference_result, medusa_result
-FROM fs, child
-WHERE child.parent = fs.rowid
-)
-SELECT case_id, case_name, subject_cid, subject_context, node_rowid, name AS path, operation, reference_result, medusa_result
-From child
+  (SELECT accesses.case_id,
+          accesses.node_rowid,
+          accesses.subject_cid,
+          cases.name AS case_name,
+          contexts.name AS subject_context,
+          fs.rowid,
+          fs.parent,
+          fs.name,
+          fs.selinux_user,
+          fs.selinux_role,
+          fs.selinux_type,
+          operation,
+          results.reference_result,
+          results.medusa_result
+   FROM accesses
+   JOIN cases ON case_id = cases.rowid
+   JOIN contexts ON subject_cid = contexts.rowid
+   JOIN fs ON node_rowid = fs.rowid
+   LEFT JOIN results ON accesses.ROWID = results.access_id
+   LEFT JOIN operations ON results.operation_id = operations.rowid
+   UNION ALL SELECT case_id,
+                    node_rowid,
+                    subject_cid,
+                    case_name,
+                    subject_context,
+                    fs.rowid,
+                    fs.parent,
+                    fs.name || '/' || child.name,
+                    fs.selinux_user,
+                    fs.selinux_role,
+                    fs.selinux_type,
+                    operation,
+                    reference_result,
+                    medusa_result
+   FROM fs,
+        child
+   WHERE child.parent = fs.rowid )
+SELECT case_id,
+       case_name,
+       subject_cid,
+       subject_context,
+       node_rowid,
+       name AS PATH,
+       selinux_user,
+       selinux_role,
+       selinux_type,
+       operation,
+       reference_result,
+       medusa_result
+FROM child
 WHERE rowid = 1"""
         )
 
