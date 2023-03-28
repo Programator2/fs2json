@@ -198,6 +198,174 @@ class DatabaseWriter(DatabaseCommon):
             return self.insert_access(case_id, subject_cid, path_rowid)
         return rowid
 
+    def insert_selinux_accesses(
+        self,
+        case_name: str,
+        subject_context: str,
+        object_types: Iterable[str],
+        verbose: bool = False,
+    ):
+        """Fill accesses table in the database.
+
+        Fill a table with SELinux accesses from `subject_context` to all files
+        with types from `selinux_types`.
+
+        :param case_name: Name of the service that is examined. This will be
+        used as a unique value in the database.
+        :param subject_context: SELinux context of the subject.
+        :param object_types:SELinux types that will be searched in the database
+        and found files will be examined for read and write permissions from the
+        subject.
+        :param verbose: Turns on verbose output.
+        """
+        self._prepare_accesses()
+        self.cur.execute(
+            'INSERT INTO cases VALUES(?) ON CONFLICT DO NOTHING',
+            (case_name,),
+        )
+        case_id = self.get_case_id(case_name)
+        self.cur.execute(
+            'INSERT INTO contexts VALUES(?) ON CONFLICT DO NOTHING',
+            (subject_context,),
+        )
+        subject_cid = self.get_context_id(subject_context)
+        files = self.get_paths_by_selinux_type(object_types)
+        perms = ('read', 'write')
+        perms_id = self.get_operations_id(perms)
+        for (
+            rowid,
+            path,
+            _type,
+            selinux_user,
+            selinux_role,
+            selinux_type,
+            selinux_sensitivity,
+            selinux_category,
+        ) in files:
+            context = construct_selinux_context(
+                selinux_user,
+                selinux_role,
+                selinux_type,
+                selinux_sensitivity,
+                selinux_category,
+            )
+            is_dir = stat.S_ISDIR(_type)
+            _class = 'dir' if is_dir else 'file'
+
+            results = [
+                selinux_check_access(subject_context, context, _class, perm)
+                for perm in perms
+            ]
+            if verbose:
+                for perm, result in zip(perms, results):
+                    print(
+                        f'{subject_context}=>{context} {path} ({_class}:{perm})={result}'
+                    )
+            self.cur.execute(
+                'INSERT INTO accesses VALUES(?, ?, ?)',
+                (
+                    case_id,
+                    subject_cid,
+                    rowid,
+                ),
+            )
+
+            access_id = self.cur.lastrowid
+
+            for perm_id, result in zip(perms_id, results):
+                self.insert_result(access_id, perm_id, result, None)
+
+    def _prepare_accesses(self):
+        self.cur.execute(
+            """CREATE TABLE IF NOT EXISTS accesses (
+            case_id INTEGER,
+            subject_cid INTEGER,
+            node_rowid INTEGER,
+            UNIQUE (case_id, subject_cid, node_rowid) ON CONFLICT IGNORE
+            )"""
+        )
+        self.cur.execute(
+            """CREATE TABLE IF NOT EXISTS results (
+            access_id INTEGER,
+            operation_id INTEGER,
+            reference_result INTEGER,
+            medusa_result INTEGER,
+            PRIMARY KEY (access_id, operation_id)
+            )"""
+        )
+        self.cur.execute(
+            'CREATE INDEX IF NOT EXISTS case_index ON accesses (case_id)'
+        )
+        self.cur.execute(
+            'CREATE INDEX IF NOT EXISTS access_index ON results (access_id)'
+        )
+        self.cur.execute("CREATE TABLE IF NOT EXISTS cases(name TEXT UNIQUE)")
+        self.cur.execute(
+            "CREATE TABLE IF NOT EXISTS contexts(name TEXT UNIQUE)"
+        )
+        self.cur.execute(
+            "CREATE TABLE IF NOT EXISTS operations(operation TEXT UNIQUE)"
+        )
+        self.cur.executemany(
+            'INSERT INTO operations VALUES(?) ON CONFLICT DO NOTHING',
+            (('read',), ('write',)),
+        )
+        self.cur.execute(
+            """CREATE VIEW IF NOT EXISTS translated_accesses AS
+WITH RECURSIVE child AS
+  (SELECT accesses.case_id,
+          accesses.node_rowid,
+          accesses.subject_cid,
+          cases.name AS case_name,
+          contexts.name AS subject_context,
+          fs.rowid,
+          fs.parent,
+          fs.name,
+          fs.selinux_user,
+          fs.selinux_role,
+          fs.selinux_type,
+          operation,
+          results.reference_result,
+          results.medusa_result
+   FROM accesses
+   JOIN cases ON case_id = cases.rowid
+   JOIN contexts ON subject_cid = contexts.rowid
+   JOIN fs ON node_rowid = fs.rowid
+   LEFT JOIN results ON accesses.ROWID = results.access_id
+   LEFT JOIN operations ON results.operation_id = operations.rowid
+   UNION ALL SELECT case_id,
+                    node_rowid,
+                    subject_cid,
+                    case_name,
+                    subject_context,
+                    fs.rowid,
+                    fs.parent,
+                    fs.name || '/' || child.name,
+                    fs.selinux_user,
+                    fs.selinux_role,
+                    fs.selinux_type,
+                    operation,
+                    reference_result,
+                    medusa_result
+   FROM fs,
+        child
+   WHERE child.parent = fs.rowid )
+SELECT case_id,
+       case_name,
+       subject_cid,
+       subject_context,
+       node_rowid,
+       name AS PATH,
+       selinux_user,
+       selinux_role,
+       selinux_type,
+       operation,
+       reference_result,
+       medusa_result
+FROM child
+WHERE rowid = 1"""
+        )
+
     def close(self):
         self.con.commit()
         self.cur.close()
@@ -310,174 +478,6 @@ class DatabaseCreator(DatabaseWriter):
                     f"INSERT INTO membership SELECT uid, '{g.gr_gid}' FROM users WHERE name = ?",
                     (username,),
                 )
-
-    def _prepare_accesses(self):
-        self.cur.execute(
-            """CREATE TABLE IF NOT EXISTS accesses (
-            case_id INTEGER,
-            subject_cid INTEGER,
-            node_rowid INTEGER,
-            UNIQUE (case_id, subject_cid, node_rowid) ON CONFLICT IGNORE
-            )"""
-        )
-        self.cur.execute(
-            """CREATE TABLE IF NOT EXISTS results (
-            access_id INTEGER,
-            operation_id INTEGER,
-            reference_result INTEGER,
-            medusa_result INTEGER,
-            PRIMARY KEY (access_id, operation_id)
-            )"""
-        )
-        self.cur.execute(
-            'CREATE INDEX IF NOT EXISTS case_index ON accesses (case_id)'
-        )
-        self.cur.execute(
-            'CREATE INDEX IF NOT EXISTS access_index ON results (access_id)'
-        )
-        self.cur.execute("CREATE TABLE IF NOT EXISTS cases(name TEXT UNIQUE)")
-        self.cur.execute(
-            "CREATE TABLE IF NOT EXISTS contexts(name TEXT UNIQUE)"
-        )
-        self.cur.execute(
-            "CREATE TABLE IF NOT EXISTS operations(operation TEXT UNIQUE)"
-        )
-        self.cur.executemany(
-            'INSERT INTO operations VALUES(?) ON CONFLICT DO NOTHING',
-            (('read',), ('write',)),
-        )
-        self.cur.execute(
-            """CREATE VIEW IF NOT EXISTS translated_accesses AS
-WITH RECURSIVE child AS
-  (SELECT accesses.case_id,
-          accesses.node_rowid,
-          accesses.subject_cid,
-          cases.name AS case_name,
-          contexts.name AS subject_context,
-          fs.rowid,
-          fs.parent,
-          fs.name,
-          fs.selinux_user,
-          fs.selinux_role,
-          fs.selinux_type,
-          operation,
-          results.reference_result,
-          results.medusa_result
-   FROM accesses
-   JOIN cases ON case_id = cases.rowid
-   JOIN contexts ON subject_cid = contexts.rowid
-   JOIN fs ON node_rowid = fs.rowid
-   LEFT JOIN results ON accesses.ROWID = results.access_id
-   LEFT JOIN operations ON results.operation_id = operations.rowid
-   UNION ALL SELECT case_id,
-                    node_rowid,
-                    subject_cid,
-                    case_name,
-                    subject_context,
-                    fs.rowid,
-                    fs.parent,
-                    fs.name || '/' || child.name,
-                    fs.selinux_user,
-                    fs.selinux_role,
-                    fs.selinux_type,
-                    operation,
-                    reference_result,
-                    medusa_result
-   FROM fs,
-        child
-   WHERE child.parent = fs.rowid )
-SELECT case_id,
-       case_name,
-       subject_cid,
-       subject_context,
-       node_rowid,
-       name AS PATH,
-       selinux_user,
-       selinux_role,
-       selinux_type,
-       operation,
-       reference_result,
-       medusa_result
-FROM child
-WHERE rowid = 1"""
-        )
-
-    def insert_selinux_accesses(
-        self,
-        case_name: str,
-        subject_context: str,
-        object_types: Iterable[str],
-        verbose: bool = False,
-    ):
-        """Fill accesses table in the database.
-
-        Fill a table with SELinux accesses from `subject_context` to all files
-        with types from `selinux_types`.
-
-        :param case_name: Name of the service that is examined. This will be
-        used as a unique value in the database.
-        :param subject_context: SELinux context of the subject.
-        :param object_types:SELinux types that will be searched in the database
-        and found files will be examined for read and write permissions from the
-        subject.
-        :param verbose: Turns on verbose output.
-        """
-        self._prepare_accesses()
-        self.cur.execute(
-            'INSERT INTO cases VALUES(?) ON CONFLICT DO NOTHING',
-            (case_name,),
-        )
-        case_id = self.get_case_id(case_name)
-        self.cur.execute(
-            'INSERT INTO contexts VALUES(?) ON CONFLICT DO NOTHING',
-            (subject_context,),
-        )
-        subject_cid = self.get_context_id(subject_context)
-        files = self.get_paths_by_selinux_type(object_types)
-        perms = ('read', 'write')
-        perms_id = self.get_operations_id(perms)
-        for (
-            rowid,
-            path,
-            _type,
-            selinux_user,
-            selinux_role,
-            selinux_type,
-            selinux_sensitivity,
-            selinux_category,
-        ) in files:
-            context = construct_selinux_context(
-                selinux_user,
-                selinux_role,
-                selinux_type,
-                selinux_sensitivity,
-                selinux_category,
-            )
-            is_dir = stat.S_ISDIR(_type)
-            _class = 'dir' if is_dir else 'file'
-
-            results = [
-                selinux_check_access(subject_context, context, _class, perm)
-                for perm in perms
-            ]
-            if verbose:
-                for perm, result in zip(perms, results):
-                    print(
-                        f'{subject_context}=>{context} {path} ({_class}:{perm})={result}'
-                    )
-            self.cur.execute(
-                'INSERT INTO accesses VALUES(?, ?, ?)',
-                (
-                    case_id,
-                    subject_cid,
-                    rowid,
-                ),
-            )
-
-            access_id = self.cur.lastrowid
-
-            for perm_id, result in zip(perms_id, results):
-                self.insert_result(access_id, perm_id, result, None)
 
     def close(self):
         self.cur.execute('END TRANSACTION')
