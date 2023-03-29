@@ -7,7 +7,11 @@ from collections import namedtuple
 import os
 import stat
 from collections.abc import Iterable
-from .helpers import construct_selinux_context, selinux_check_access
+from .helpers import (
+    construct_selinux_context,
+    selinux_check_access,
+    selinux_label_lookup,
+)
 
 if os.name == 'posix':
     import pwd
@@ -143,6 +147,7 @@ class DatabaseWriter(DatabaseCommon):
     def __init__(self, path: str):
         self.con = sqlite3.connect(path, isolation_level=None)
         self.cur = self.con.cursor()
+        self._prepare_accesses()
 
     def insert_access(
         self, case_id: int, subject_cid: int, path_rowid: int
@@ -169,24 +174,14 @@ class DatabaseWriter(DatabaseCommon):
                 '''INSERT INTO results VALUES(?, ?, null, ?)
                 ON CONFLICT (access_id, operation_id)
                 DO UPDATE SET medusa_result = ?''',
-                (
-                    access_id,
-                    perm_id,
-                    result_med,
-                    result_med
-                ),
+                (access_id, perm_id, result_med, result_med),
             )
         elif result_med is None:
             self.cur.execute(
                 '''INSERT INTO results VALUES(?, ?, ?, null)
                 ON CONFLICT (access_id, operation_id)
                 DO UPDATE SET reference_result = ?''',
-                (
-                    access_id,
-                    perm_id,
-                    result_ref,
-                    result_ref
-                ),
+                (access_id, perm_id, result_ref, result_ref),
             )
         else:
             raise Exception('One of the results has to be None.')
@@ -197,6 +192,35 @@ class DatabaseWriter(DatabaseCommon):
         if (rowid := self.get_access(case_id, subject_cid, path_rowid)) is None:
             return self.insert_access(case_id, subject_cid, path_rowid)
         return rowid
+
+    def _insert_selinux_access(
+        self,
+    ):
+        is_dir = stat.S_ISDIR(_type)
+        _class = 'dir' if is_dir else 'file'
+
+        results = [
+            selinux_check_access(subject_context, context, _class, perm)
+            for perm in perms
+        ]
+        if verbose:
+            for perm, result in zip(perms, results):
+                print(
+                    f'{subject_context}=>{context} {path} ({_class}:{perm})={result}'
+                )
+        self.cur.execute(
+            'INSERT INTO accesses VALUES(?, ?, ?)',
+            (
+                case_id,
+                subject_cid,
+                rowid,
+            ),
+        )
+
+        access_id = self.cur.lastrowid
+
+        for perm_id, result in zip(perms_id, results):
+            self.insert_result(access_id, perm_id, result, None)
 
     def insert_selinux_accesses(
         self,
@@ -218,7 +242,6 @@ class DatabaseWriter(DatabaseCommon):
         subject.
         :param verbose: Turns on verbose output.
         """
-        self._prepare_accesses()
         self.cur.execute(
             'INSERT INTO cases VALUES(?) ON CONFLICT DO NOTHING',
             (case_name,),
@@ -274,6 +297,138 @@ class DatabaseWriter(DatabaseCommon):
 
             for perm_id, result in zip(perms_id, results):
                 self.insert_result(access_id, perm_id, result, None)
+
+    def fill_missing_selinux_accesses(
+        self,
+        case_name: str,
+        subject_context: str,
+        object_types: Iterable[str],
+        verbose: bool = False,
+    ):
+        """Fill missing accesses for SELinux in the database.
+
+        Fill a table with SELinux accesses from `subject_context` to all files
+        with types from `selinux_types`.
+
+        :param case_name: Name of the service that is examined. This will be
+        used as a unique value in the database.
+        :param subject_context: SELinux context of the subject.
+        :param object_types:SELinux types that will be searched in the database
+        and found files will be examined for read and write permissions from the
+        subject.
+        :param verbose: Turns on verbose output.
+        """
+        perms = ('read', 'write')
+        perms_id = self.get_operations_id(perms)
+
+        res = self.cur.execute(
+            """WITH RECURSIVE child AS
+  (SELECT accesses.rowid AS access_rowid,
+          accesses.node_rowid,
+          accesses.subject_cid,
+          contexts.name AS subject_context,
+          fs.rowid,
+          fs.parent,
+          fs.name,
+          type,
+          fs.selinux_user,
+          fs.selinux_role,
+          fs.selinux_type,
+          fs.selinux_category,
+          fs.selinux_sensitivity,
+          operations.rowid AS operation_id,
+          operation,
+          results.reference_result,
+          results.medusa_result
+   FROM accesses
+   JOIN contexts ON subject_cid = contexts.rowid
+   JOIN fs ON node_rowid = fs.rowid
+   LEFT JOIN results ON accesses.ROWID = results.access_id
+   LEFT JOIN operations ON results.operation_id = operations.rowid
+   WHERE case_id = 1
+     AND reference_result IS NULL
+   UNION ALL SELECT access_rowid,
+                    node_rowid,
+                    subject_cid,
+                    subject_context,
+                    fs.rowid,
+                    fs.parent,
+                    fs.name || '/' || child.name,
+                    child.type,
+                    child.selinux_user,
+                    child.selinux_role,
+                    child.selinux_type,
+                    child.selinux_category,
+                    child.selinux_sensitivity,
+                    operation_id,
+                    operation,
+                    reference_result,
+                    medusa_result
+   FROM fs,
+        child
+   WHERE child.parent = fs.rowid )
+SELECT access_rowid,
+       subject_cid,
+       subject_context,
+       node_rowid,
+       name AS path,
+       TYPE,
+       selinux_user || ':' || selinux_role || ':' || selinux_type || ':' || selinux_sensitivity || COALESCE(':' || selinux_category, '') AS selinux_context,
+       operation_id,
+       operation,
+       reference_result,
+       medusa_result
+FROM child
+WHERE rowid = 1
+        """
+        )
+        accesses = res.fetchall()
+        for (
+            access_id,
+            subject_cid,
+            subject_context,
+            node_rowid,
+            path,
+            _type,
+            selinux_context,
+            operation_id,
+            operation,
+            reference_result,
+            medusa_result,
+        ) in accesses:
+            if selinux_context is None:
+                selinux_context = selinux_label_lookup(path, _type)
+
+            is_dir = stat.S_ISDIR(_type)
+            _class = 'dir' if is_dir else 'file'
+
+            if operation_id is None:
+                # Computer access permissions for all operations
+                results = [
+                    selinux_check_access(
+                        subject_context, selinux_context, _class, perm
+                    )
+                    for perm in perms
+                ]
+                if verbose:
+                    for perm, result in zip(perms, results):
+                        print(
+                            f'{subject_context}=>{selinux_context} {path} ({_class}:{perm})={result}'
+                        )
+
+                for perm_id, result in zip(perms_id, results):
+                    self.insert_result(access_id, perm_id, result, None)
+                continue
+            # Updating just one operation
+            result = selinux_check_access(
+                subject_context, selinux_context, _class, operation
+            )
+            if verbose:
+                print(
+                    f'{subject_context}=>{selinux_context} {path} ({_class}:{operation})={result}'
+                )
+
+            self.insert_result(access_id, operation_id, result, None)
 
     def _prepare_accesses(self):
         self.cur.execute(
@@ -341,9 +496,9 @@ WITH RECURSIVE child AS
                     fs.rowid,
                     fs.parent,
                     fs.name || '/' || child.name,
-                    fs.selinux_user,
-                    fs.selinux_role,
-                    fs.selinux_type,
+                    child.selinux_user,
+                    child.selinux_role,
+                    child.selinux_type,
                     operation,
                     reference_result,
                     medusa_result
