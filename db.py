@@ -522,6 +522,7 @@ WHERE rowid = 1"""
         )
 
     def close(self):
+        """Commit and close the database file."""
         self.con.commit()
         self.cur.close()
         self.con.close()
@@ -531,6 +532,7 @@ class DatabaseCreator(DatabaseWriter):
     """Creation of the database."""
 
     def __init__(self, path: str, drop: bool = False):
+        """Create `DatabaseCreator`."""
         super().__init__(path)
         if drop:
             self.drop_db()
@@ -540,6 +542,7 @@ class DatabaseCreator(DatabaseWriter):
         self.cur.execute('BEGIN TRANSACTION')
 
     def drop_db(self):
+        """Drop tables maintained by `DatabaseCreator`."""
         self.cur.executescript(
             """DROP TABLE IF EXISTS fs;
             DROP TABLE IF EXISTS users;
@@ -549,6 +552,7 @@ class DatabaseCreator(DatabaseWriter):
         )
 
     def create_db(self):
+        """Create basic empty tables."""
         self.cur.execute(
             "CREATE TABLE IF NOT EXISTS fs(parent INTEGER, name TEXT, ino INTEGER, dev INTEGER, nlink INTEGER, uid INTEGER, gid INTEGER, size INTEGER, atime INTEGER, mtime INTEGER, ctime INTEGER, type INTEGER, mode INTEGER, selinux_user TEXT, selinux_role TEXT, selinux_type TEXT, selinux_sensitivity TEXT, selinux_category TEXT)"
         )
