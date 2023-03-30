@@ -557,7 +557,7 @@ WHERE rowid = 1
                ON eval_cases (eval_case)'''
         )
         self.cur.execute(
-            """CREATE VIEW translated_accesses AS
+            """CREATE VIEW IF NOT EXISTS translated_accesses AS
 WITH RECURSIVE child AS
   (SELECT accesses.case_id,
           accesses.node_rowid,
