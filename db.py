@@ -167,24 +167,89 @@ class DatabaseWriter(DatabaseCommon):
         access_id: int,
         perm_id: int,
         result_ref: int | None,
+        eval_case_id: int | None,
         result_med: int | None,
     ) -> None:
+        """Insert result from medusa into the database.
+
+        Inserting reference (eg. selinux) results is deprecated but still
+        supported.
+
+        :param access_id: rowid from accesses table
+        :param perm_id: rowid from operations table
+        :param result_ref: `1` if reference allows the oepration.
+        :param eval_case_id: rowid from the eval_cases table
+        :param result_med: `1` if Medusa allows the operation for the give
+        evaluation case
+        """
         if result_ref is None:
+            result_id = self.insert_or_select_result(access_id, perm_id, None)
             self.cur.execute(
-                '''INSERT INTO results VALUES(?, ?, null, ?)
-                ON CONFLICT (access_id, operation_id)
+                '''INSERT INTO medusa_results VALUES(?, ?, ?)
+                ON CONFLICT (result_id, eval_case_id)
                 DO UPDATE SET medusa_result = ?''',
-                (access_id, perm_id, result_med, result_med),
+                (result_id, eval_case_id, result_med, result_med),
             )
         elif result_med is None:
-            self.cur.execute(
-                '''INSERT INTO results VALUES(?, ?, ?, null)
-                ON CONFLICT (access_id, operation_id)
-                DO UPDATE SET reference_result = ?''',
-                (access_id, perm_id, result_ref, result_ref),
-            )
+            self.insert_ref_result(access_id, perm_id, result_ref)
         else:
             raise Exception('One of the results has to be None.')
+
+    def insert_or_select_result(
+        self, access_id: int, operation_id: int, result_ref: int
+    ) -> int:
+        if (rowid := self.get_result(access_id, operation_id)) is None:
+            return self.insert_ref_result(access_id, operation_id, result_ref)
+        return rowid
+
+    def get_result(self, access_id: int, operation_id: int) -> int | None:
+        res = self.cur.execute(
+            '''SELECT rowid FROM results WHERE
+                access_id = ? AND
+                operation_id = ?''',
+            (
+                access_id,
+                operation_id,
+            ),
+        )
+        row = res.fetchone()
+        if row is None:
+            return None
+        return row[0]
+
+    def insert_ref_result(
+        self, access_id: int, perm_id: int, result_ref: int
+    ) -> int:
+        self.cur.execute(
+            '''INSERT INTO results VALUES(?, ?, ?)
+            ON CONFLICT (access_id, operation_id)
+            DO UPDATE SET reference_result = ?''',
+            (access_id, perm_id, result_ref, result_ref),
+        )
+        return self.cur.lastrowid
+
+    def insert_or_select_eval_case(self, eval_case: str) -> int:
+        if (rowid := self.get_eval_case(eval_case)) is None:
+            return self.insert_eval_case(eval_case)
+        return rowid
+
+    def get_eval_case(self, eval_case: str) -> int | None:
+        res = self.cur.execute(
+            '''SELECT rowid FROM eval_cases WHERE
+                eval_case = ?''',
+            (eval_case,),
+        )
+        row = res.fetchone()
+        if row is None:
+            return None
+        return row[0]
+
+    def insert_eval_case(self, eval_case: str) -> int:
+        self.cur.execute(
+            '''INSERT INTO eval_cases VALUES(?)''',
+            (eval_case,),
+        )
+        return self.cur.lastrowid
 
     def insert_or_select_access(
         self, case_id: int, subject_cid: int, path_rowid: int
@@ -220,7 +285,7 @@ class DatabaseWriter(DatabaseCommon):
         access_id = self.cur.lastrowid
 
         for perm_id, result in zip(perms_id, results):
-            self.insert_result(access_id, perm_id, result, None)
+            self.insert_ref_result(access_id, perm_id, result)
 
     def insert_selinux_accesses(
         self,
@@ -296,7 +361,7 @@ class DatabaseWriter(DatabaseCommon):
             access_id = self.cur.lastrowid
 
             for perm_id, result in zip(perms_id, results):
-                self.insert_result(access_id, perm_id, result, None)
+                self.insert_ref_result(access_id, perm_id, result)
 
     def fill_missing_selinux_accesses(
         self,
@@ -338,8 +403,7 @@ class DatabaseWriter(DatabaseCommon):
           fs.selinux_sensitivity,
           operations.rowid AS operation_id,
           operation,
-          results.reference_result,
-          results.medusa_result
+          results.reference_result
    FROM accesses
    JOIN contexts ON subject_cid = contexts.rowid
    JOIN fs ON node_rowid = fs.rowid
@@ -362,8 +426,7 @@ class DatabaseWriter(DatabaseCommon):
                     child.selinux_sensitivity,
                     operation_id,
                     operation,
-                    reference_result,
-                    medusa_result
+                    reference_result
    FROM fs,
         child
    WHERE child.parent = fs.rowid )
@@ -376,8 +439,7 @@ SELECT access_rowid,
        selinux_user || ':' || selinux_role || ':' || selinux_type || ':' || selinux_sensitivity || COALESCE(':' || selinux_category, '') AS selinux_context,
        operation_id,
        operation,
-       reference_result,
-       medusa_result
+       reference_result
 FROM child
 WHERE rowid = 1
         """
@@ -394,7 +456,6 @@ WHERE rowid = 1
             operation_id,
             operation,
             reference_result,
-            medusa_result,
         ) in accesses:
             if selinux_context is None:
                 selinux_context = selinux_label_lookup(path, _type)
@@ -417,7 +478,7 @@ WHERE rowid = 1
                         )
 
                 for perm_id, result in zip(perms_id, results):
-                    self.insert_result(access_id, perm_id, result, None)
+                    self.insert_ref_result(access_id, perm_id, result)
                 continue
             # Updating just one operation
             result = selinux_check_access(
@@ -428,7 +489,7 @@ WHERE rowid = 1
                     f'{subject_context}=>{selinux_context} {path} ({_class}:{operation})={result}'
                 )
 
-            self.insert_result(access_id, operation_id, result, None)
+            self.insert_ref_result(access_id, operation_id, result)
 
     def _prepare_accesses(self):
         self.cur.execute(
@@ -440,33 +501,63 @@ WHERE rowid = 1
             )"""
         )
         self.cur.execute(
+            'CREATE INDEX IF NOT EXISTS case_index ON accesses (case_id)'
+        )
+        self.cur.execute(
             """CREATE TABLE IF NOT EXISTS results (
             access_id INTEGER,
             operation_id INTEGER,
             reference_result INTEGER,
-            medusa_result INTEGER,
-            PRIMARY KEY (access_id, operation_id)
+            UNIQUE (access_id, operation_id)
             )"""
-        )
-        self.cur.execute(
-            'CREATE INDEX IF NOT EXISTS case_index ON accesses (case_id)'
         )
         self.cur.execute(
             'CREATE INDEX IF NOT EXISTS access_index ON results (access_id)'
         )
+        self.cur.execute(
+            '''CREATE INDEX IF NOT EXISTS access__operation_index
+               ON results (access_id, operation_id)'''
+        )
         self.cur.execute("CREATE TABLE IF NOT EXISTS cases(name TEXT UNIQUE)")
+        self.cur.execute(
+            'CREATE INDEX IF NOT EXISTS case_index ON cases (name)'
+        )
         self.cur.execute(
             "CREATE TABLE IF NOT EXISTS contexts(name TEXT UNIQUE)"
         )
         self.cur.execute(
+            'CREATE INDEX IF NOT EXISTS context_index ON contexts (name)'
+        )
+        self.cur.execute(
             "CREATE TABLE IF NOT EXISTS operations(operation TEXT UNIQUE)"
+        )
+        self.cur.execute(
+            'CREATE INDEX IF NOT EXISTS operation_index ON operations (operation)'
         )
         self.cur.executemany(
             'INSERT INTO operations VALUES(?) ON CONFLICT DO NOTHING',
             (('read',), ('write',)),
         )
         self.cur.execute(
-            """CREATE VIEW IF NOT EXISTS translated_accesses AS
+            '''CREATE TABLE IF NOT EXISTS medusa_results(
+               result_id INTEGER,
+               eval_case_id INTEGER,
+               medusa_result INTEGER,
+               PRIMARY KEY (result_id, eval_case_id))'''
+        )
+        # self.cur.execute(
+        #     '''CREATE INDEX IF NOT EXISTS result_eval_case_index
+        #        ON medusa_results (result_id, eval_case_id)'''
+        # )
+        self.cur.execute(
+            "CREATE TABLE IF NOT EXISTS eval_cases(eval_case TEXT UNIQUE)"
+        )
+        self.cur.execute(
+            '''CREATE INDEX IF NOT EXISTS eval_case_index
+               ON eval_cases (eval_case)'''
+        )
+        self.cur.execute(
+            """CREATE VIEW translated_accesses AS
 WITH RECURSIVE child AS
   (SELECT accesses.case_id,
           accesses.node_rowid,
@@ -481,13 +572,17 @@ WITH RECURSIVE child AS
           fs.selinux_type,
           operation,
           results.reference_result,
-          results.medusa_result
+		  medusa_results.eval_case_id,
+		  eval_cases.eval_case,
+          medusa_results.medusa_result
    FROM accesses
    JOIN cases ON case_id = cases.rowid
    JOIN contexts ON subject_cid = contexts.rowid
    JOIN fs ON node_rowid = fs.rowid
    LEFT JOIN results ON accesses.ROWID = results.access_id
    LEFT JOIN operations ON results.operation_id = operations.rowid
+   LEFT JOIN medusa_results ON results.rowid = medusa_results.result_id
+   JOIN eval_cases ON medusa_results.eval_case_id = eval_cases.rowid
    UNION ALL SELECT case_id,
                     node_rowid,
                     subject_cid,
@@ -501,6 +596,8 @@ WITH RECURSIVE child AS
                     child.selinux_type,
                     operation,
                     reference_result,
+					eval_case_id,
+					eval_case,
                     medusa_result
    FROM fs,
         child
@@ -516,6 +613,8 @@ SELECT case_id,
        selinux_type,
        operation,
        reference_result,
+	   eval_case_id,
+	   eval_case,
        medusa_result
 FROM child
 WHERE rowid = 1"""
