@@ -151,6 +151,44 @@ WHERE rowid = 1'''
             return None
         return row[0]
 
+    def _get_permission_confusion_count(
+        self,
+        case_id: int,
+        subject_cid: int,
+        eval_case_id: int,
+        reference_result: int,
+        medusa_result: int,
+    ) -> int:
+        ret = self.cur.execute(
+            ''' SELECT COUNT(*)
+ FROM accesses
+ LEFT JOIN results ON accesses.ROWID = results.access_id
+ LEFT JOIN medusa_results ON results.rowid = medusa_results.result_id
+ WHERE case_id = ? AND subject_cid = ? AND eval_case_id = ? AND reference_result = ? AND medusa_result = ?''',
+            (
+                case_id,
+                subject_cid,
+                eval_case_id,
+                reference_result,
+                medusa_result,
+            ),
+        )
+        return ret.fetchone()[0]
+
+    def get_permission_confusion(
+        self, case: str, context: str, eval_case: str
+    ) -> tuple[int, int, int, int]:
+        case_id = self.get_case_id(case)
+        subject_cid = self.get_context_id(context)
+        eval_case_id = self.get_eval_case(eval_case)
+        results = ((1, 1), (0, 0), (0, 1), (1, 0))
+        return [
+            self._get_permission_confusion_count(
+                case_id, subject_cid, eval_case_id, *result
+            )
+            for result in results
+        ]
+
 
 class DatabaseWriter(DatabaseCommon):
     """Database with read-write support."""
