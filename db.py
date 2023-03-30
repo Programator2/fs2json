@@ -98,6 +98,17 @@ WHERE rowid = 1'''
         # TODO: Handle row being `None`
         return ret
 
+    def get_eval_case(self, eval_case: str) -> int | None:
+        res = self.cur.execute(
+            '''SELECT rowid FROM eval_cases WHERE
+                eval_case = ?''',
+            (eval_case,),
+        )
+        row = res.fetchone()
+        if row is None:
+            return None
+        return row[0]
+
     def get_access(
         self, case_id: int, subject_cid: int, path_rowid: int
     ) -> int | None:
@@ -232,17 +243,6 @@ class DatabaseWriter(DatabaseCommon):
         if (rowid := self.get_eval_case(eval_case)) is None:
             return self.insert_eval_case(eval_case)
         return rowid
-
-    def get_eval_case(self, eval_case: str) -> int | None:
-        res = self.cur.execute(
-            '''SELECT rowid FROM eval_cases WHERE
-                eval_case = ?''',
-            (eval_case,),
-        )
-        row = res.fetchone()
-        if row is None:
-            return None
-        return row[0]
 
     def insert_eval_case(self, eval_case: str) -> int:
         self.cur.execute(
