@@ -176,18 +176,22 @@ WHERE rowid = 1'''
         return ret.fetchone()[0]
 
     def get_permission_confusion(
-        self, case: str, context: str, eval_case: str
+        self, case: str, contexts: Iterable[str], eval_case: str
     ) -> tuple[int, int, int, int]:
         case_id = self.get_case_id(case)
-        subject_cid = self.get_context_id(context)
+        subject_cids = [self.get_context_id(context) for context in contexts]
         eval_case_id = self.get_eval_case(eval_case)
         results = ((1, 1), (0, 0), (0, 1), (1, 0))
-        return [
-            self._get_permission_confusion_count(
-                case_id, subject_cid, eval_case_id, *result
-            )
-            for result in results
+        ret = [
+            [
+                self._get_permission_confusion_count(
+                    case_id, subject_cid, eval_case_id, *result
+                )
+                for result in results
+            ]
+            for subject_cid in subject_cids
         ]
+        return tuple(sum(x) for x in zip(*ret))
 
 
 class DatabaseWriter(DatabaseCommon):
@@ -311,16 +315,10 @@ class DatabaseWriter(DatabaseCommon):
                 print(
                     f'{subject_context}=>{context} {path} ({_class}:{perm})={result}'
                 )
-        self.cur.execute(
-            'INSERT INTO accesses VALUES(?, ?, ?)',
-            (
-                case_id,
-                subject_cid,
-                rowid,
-            ),
-        )
 
-        access_id = self.cur.lastrowid
+        access_id = self.insert_or_select_access(
+            case_id, subject_cid, path_rowid
+        )
 
         for perm_id, result in zip(perms_id, results):
             self.insert_ref_result(access_id, perm_id, result)
@@ -328,7 +326,7 @@ class DatabaseWriter(DatabaseCommon):
     def insert_selinux_accesses(
         self,
         case_name: str,
-        subject_context: str,
+        subject_contexts: Iterable[str],
         object_types: Iterable[str],
         verbose: bool = False,
     ):
@@ -350,11 +348,15 @@ class DatabaseWriter(DatabaseCommon):
             (case_name,),
         )
         case_id = self.get_case_id(case_name)
-        self.cur.execute(
-            'INSERT INTO contexts VALUES(?) ON CONFLICT DO NOTHING',
-            (subject_context,),
-        )
-        subject_cid = self.get_context_id(subject_context)
+        for subject_context in subject_contexts:
+            self.cur.execute(
+                'INSERT INTO contexts VALUES(?) ON CONFLICT DO NOTHING',
+                (subject_context,),
+            )
+        subject_cids = [
+            self.get_context_id(subject_context)
+            for subject_context in subject_contexts
+        ]
         files = self.get_paths_by_selinux_type(object_types)
         perms = ('read', 'write')
         perms_id = self.get_operations_id(perms)
@@ -387,25 +389,17 @@ class DatabaseWriter(DatabaseCommon):
                     print(
                         f'{subject_context}=>{context} {path} ({_class}:{perm})={result}'
                     )
-            self.cur.execute(
-                'INSERT INTO accesses VALUES(?, ?, ?)',
-                (
-                    case_id,
-                    subject_cid,
-                    rowid,
-                ),
-            )
+            for subject_cid in subject_cids:
+                access_id = self.insert_or_select_access(
+                    case_id, subject_cid, path_rowid
+                )
 
-            access_id = self.cur.lastrowid
-
-            for perm_id, result in zip(perms_id, results):
-                self.insert_ref_result(access_id, perm_id, result)
+                for perm_id, result in zip(perms_id, results):
+                    self.insert_ref_result(access_id, perm_id, result)
 
     def fill_missing_selinux_accesses(
         self,
         case_name: str,
-        subject_context: str,
-        object_types: Iterable[str],
         verbose: bool = False,
     ):
         """Fill missing accesses for SELinux in the database.
@@ -415,14 +409,11 @@ class DatabaseWriter(DatabaseCommon):
 
         :param case_name: Name of the service that is examined. This will be
         used as a unique value in the database.
-        :param subject_context: SELinux context of the subject.
-        :param object_types:SELinux types that will be searched in the database
-        and found files will be examined for read and write permissions from the
-        subject.
         :param verbose: Turns on verbose output.
         """
         perms = ('read', 'write')
         perms_id = self.get_operations_id(perms)
+        case_id = self.get_case_id(case_name)
 
         res = self.cur.execute(
             """WITH RECURSIVE child AS
@@ -447,7 +438,7 @@ class DatabaseWriter(DatabaseCommon):
    JOIN fs ON node_rowid = fs.rowid
    LEFT JOIN results ON accesses.ROWID = results.access_id
    LEFT JOIN operations ON results.operation_id = operations.rowid
-   WHERE case_id = 1
+   WHERE case_id = ?
      AND reference_result IS NULL
    UNION ALL SELECT access_rowid,
                     node_rowid,
@@ -480,7 +471,8 @@ SELECT access_rowid,
        reference_result
 FROM child
 WHERE rowid = 1
-        """
+        """,
+            (case_id,),
         )
         accesses = res.fetchall()
         for (
@@ -502,7 +494,7 @@ WHERE rowid = 1
             _class = 'dir' if is_dir else 'file'
 
             if operation_id is None:
-                # Computer access permissions for all operations
+                # Compute access permissions for all operations
                 results = [
                     selinux_check_access(
                         subject_context, selinux_context, _class, perm
