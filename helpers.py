@@ -41,7 +41,7 @@ def selinux_check_access(scon, tcon, tclass, perm):
     return code.get(ret, 0)
 
 
-def selinux_label_lookup(path: str, mode: int) -> str:
+def selinux_label_lookup(path: str, mode: int) -> str | None:
     """
     :param path: Path of the file which to look up.
     :param mode: mode of `path as returned by lstat.
@@ -55,7 +55,11 @@ def selinux_label_lookup(path: str, mode: int) -> str:
         # again, this time getting the information right from the filesystem
         #
         # `context` is a list [return value, actual context]
-        context = getfilecon(path)
+        try:
+            context = getfilecon(path)
+        except FileNotFoundError:
+            print(f"Can't get context for {path}.", file=sys.stderr)
+            return None
         selabel_close(handle)
         return context[1]
     selabel_close(handle)

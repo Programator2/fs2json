@@ -489,6 +489,9 @@ WHERE rowid = 1
         ) in accesses:
             if selinux_context is None:
                 selinux_context = selinux_label_lookup(path, _type)
+            if selinux_context is None:
+                # Nothing to do here, we have to skip this path from evaluation
+                continue
 
             is_dir = stat.S_ISDIR(_type)
             _class = 'dir' if is_dir else 'file'
