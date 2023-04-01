@@ -361,7 +361,7 @@ class DatabaseWriter(DatabaseCommon):
         perms = ('read', 'write')
         perms_id = self.get_operations_id(perms)
         for (
-            rowid,
+            path_rowid,
             path,
             _type,
             selinux_user,
