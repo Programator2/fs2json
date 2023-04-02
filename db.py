@@ -128,7 +128,12 @@ WHERE rowid = 1'''
             return None
         return row[0]
 
-    def get_children(self, parent_rowid: int) -> list[tuple[int, str]]:
+    def get_children_rowids_and_names(self, parent_rowid: int) -> list[tuple[int, str]]:
+        """Return contents of directory `parent_rowid`.
+
+        :returns: A list of rowids and names corresponding to dentries inside
+        `parent_rowid` directory.
+        """
         res = self.cur.execute(
             'SELECT rowid, name FROM fs WHERE parent = ?',
             (parent_rowid,),
@@ -192,6 +197,98 @@ WHERE rowid = 1'''
             for subject_cid in subject_cids
         ]
         return tuple(sum(x) for x in zip(*ret))
+
+    def is_directory(self, path: str) -> bool:
+        """Return `True` if `path` points to a directory.
+
+        If the `path` doesn't exist, return `False`.
+        """
+        info = self.search_path(path)
+        if not info:
+            return False
+        return stat.S_ISDIR(info.type)
+
+    def get_children_inodes(self, path: str) -> list[Inode]:
+        """Return a list of `Inode` data contained in a directory at `path`."""
+        return self.search_path(path, children=True)
+
+    def search_path(
+        self, path: str, children: bool = False, number: bool = False
+    ) -> tuple | Inode | list[Inode] | int:
+        """Return inode metadata from the database if it exists.
+
+        :param path: Return inode metadata of object at this path.
+        :param children: If `True`, return children items of `path`.
+        """
+        entries = tuple(self._create_path(path))
+
+        # Root should be stored under rowid 1 in the database
+        current_folder = 1
+
+        for i, e in enumerate(entries):
+            if i == len(entries) - 1:
+                # Final path component
+                if not children:
+                    # Just return inode metadata about the last component
+                    res = self.cur.execute(
+                        'SELECT * FROM fs WHERE parent = ? AND name = ?',
+                        (current_folder, e),
+                    )
+                    row = res.fetchone()
+                    if row is None:
+                        # path doesn't exist
+                        return tuple()
+                    return Inode(*row)
+                # Get ID of the last component
+                res = self.cur.execute(
+                    'SELECT rowid FROM fs WHERE parent = ? AND name = ?',
+                    (current_folder, e),
+                )
+                row = res.fetchone()
+                if row is None:
+                    # path doesn't exist
+                    return tuple()
+                current_folder = row[0]
+                if number:
+                    # Get just the number of items
+                    res = self.cur.execute(
+                        'SELECT COUNT(*) FROM fs WHERE parent = ?',
+                        (current_folder,),
+                    )
+                    row = res.fetchone()
+                    return row[0]
+                # Continue with contents of this directory
+                res = self.cur.execute(
+                    'SELECT * FROM fs WHERE parent = ?',
+                    (current_folder,),
+                )
+                rows = res.fetchall()
+                return [Inode(*x) for x in rows]
+
+            res = self.cur.execute(
+                'SELECT rowid FROM fs WHERE parent = ? AND name = ?',
+                (current_folder, e),
+            )
+            if (row := res.fetchone()) is None:
+                # Directory does not exist
+                return tuple()
+            current_folder = row[0]
+
+        return tuple()
+
+    @staticmethod
+    def _create_path(path: str):
+        """Create necessary nodes in the tree to represent a path.
+
+        :param path: string in the form of `/this/is/a/path`. It has to start
+        with a `/` and optionally end with a `/`.
+        """
+        return filter(lambda x: bool(x), path.split('/'))
+
+    def get_owner(self, path: str) -> int:
+        """Return owner UID of a file located at `path`."""
+        info = self.search_path(path)
+        return info.uid
 
 
 class DatabaseWriter(DatabaseCommon):
@@ -790,96 +887,6 @@ class DatabaseRead(DatabaseCommon):
     def __init__(self, path):
         self.con = sqlite3.connect(path)
         self.cur = self.con.cursor()
-
-    @staticmethod
-    def _create_path(path: str):
-        """Create necessary nodes in the tree to represent a path.
-
-        :param path: string in the form of `/this/is/a/path`. It has to start
-        with a `/` and optionally end with a `/`.
-        """
-        return filter(lambda x: bool(x), path.split('/'))
-
-    def search_path(
-        self, path: str, children: bool = False, number: bool = False
-    ) -> tuple | Inode | list[Inode] | int:
-        """Return inode metadata from the database if it exists.
-
-        :param path: Return inode metadata of object at this path.
-        :param children: If `True`, return children items of `path`.
-        """
-        entries = tuple(self._create_path(path))
-
-        # Root should be stored under rowid 1 in the database
-        current_folder = 1
-
-        for i, e in enumerate(entries):
-            if i == len(entries) - 1:
-                # Final path component
-                if not children:
-                    # Just return inode metadata about the last component
-                    res = self.cur.execute(
-                        'SELECT * FROM fs WHERE parent = ? AND name = ?',
-                        (current_folder, e),
-                    )
-                    row = res.fetchone()
-                    if row is None:
-                        # path doesn't exist
-                        return tuple()
-                    return Inode(*row)
-                # Get ID of the last component
-                res = self.cur.execute(
-                    'SELECT rowid FROM fs WHERE parent = ? AND name = ?',
-                    (current_folder, e),
-                )
-                row = res.fetchone()
-                if row is None:
-                    # path doesn't exist
-                    return tuple()
-                current_folder = row[0]
-                if number:
-                    # Get just the number of items
-                    res = self.cur.execute(
-                        'SELECT COUNT(*) FROM fs WHERE parent = ?',
-                        (current_folder,),
-                    )
-                    row = res.fetchone()
-                    return row[0]
-                # Continue with contents of this directory
-                res = self.cur.execute(
-                    'SELECT * FROM fs WHERE parent = ?',
-                    (current_folder,),
-                )
-                rows = res.fetchall()
-                return [Inode(*x) for x in rows]
-
-            res = self.cur.execute(
-                'SELECT rowid FROM fs WHERE parent = ? AND name = ?',
-                (current_folder, e),
-            )
-            if (row := res.fetchone()) is None:
-                # Directory does not exist
-                return tuple()
-            current_folder = row[0]
-
-        return tuple()
-
-    def get_owner(self, path: str) -> int:
-        """Return owner UID of a file located at `path`."""
-        info = self.search_path(path)
-        return info.uid
-
-    def is_directory(self, path: str) -> bool:
-        """Return `True` if `path` points to a directory. If the `path` doesn't
-        exist, return `False`."""
-        info = self.search_path(path)
-        if not info:
-            return False
-        return stat.S_ISDIR(info.type)
-
-    def get_children(self, path: str) -> list[Inode]:
-        """Return a list of `Inode` data contained in a directory at `path`."""
-        return self.search_path(path, children=True)
 
     def get_num_children(self, path: str) -> int:
         """Return number of items in folder at `path`."""
