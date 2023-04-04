@@ -391,6 +391,35 @@ WHERE rowid = 1''',
         info = self.search_path(path)
         return info.uid
 
+    def get_directories_by_id(
+        self,
+        uids: Iterable[int],
+        gids: Iterable[int],
+    ) -> list[tuple[str, int]]:
+        """Return (path, mode) of matching directories.
+
+        Directories are matched based on `uid` or `gid`."""
+        res = self.cur.execute(
+            f'''WITH RECURSIVE child AS
+        (
+          SELECT rowid AS original, rowid, parent, name, type, mode
+          FROM fs
+          WHERE type = {stat.S_IFDIR}
+          AND (uid IN ({",".join(str(x) for x in uids)})
+               OR gid IN ({",".join(str(x) for x in gids)}))
+
+          UNION ALL
+
+          SELECT original, fs.rowid, fs.parent, fs.name || '/' || child.name, child.type, child.mode
+          FROM fs, child
+          WHERE child.parent = fs.rowid
+        )
+        SELECT name, mode
+        From child
+        WHERE rowid = 1'''
+        )
+        return res.fetchall()
+
 
 class DatabaseWriter(DatabaseCommon):
     """Database with read-write support."""
