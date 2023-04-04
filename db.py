@@ -851,6 +851,28 @@ FROM child
 WHERE rowid = 1"""
         )
 
+    def get_uid_from_name(self, name: str) -> int | None:
+        res = self.cur.execute(
+            '''SELECT uid FROM users WHERE
+                name = ?''',
+            (name,),
+        )
+        row = res.fetchone()
+        if row is None:
+            return None
+        return row[0]
+
+    def get_gid_from_name(self, name: str) -> int | None:
+        res = self.cur.execute(
+            '''SELECT gid FROM groups WHERE
+                name = ?''',
+            (name,),
+        )
+        row = res.fetchone()
+        if row is None:
+            return None
+        return row[0]
+
     def close(self):
         """Commit and close the database file."""
         self.con.commit()
