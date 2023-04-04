@@ -128,7 +128,9 @@ WHERE rowid = 1'''
             return None
         return row[0]
 
-    def get_children_rowids_and_names(self, parent_rowid: int) -> list[tuple[int, str]]:
+    def get_children_rowids_and_names(
+        self, parent_rowid: int
+    ) -> list[tuple[int, str]]:
         """Return contents of directory `parent_rowid`.
 
         :returns: A list of rowids and names corresponding to dentries inside
