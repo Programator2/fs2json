@@ -18,6 +18,8 @@ if os.name == 'posix':
     import grp
 from itertools import chain
 from pprint import pprint
+from pandas import read_sql_query
+from typing import TextIO
 
 
 Inode = namedtuple(
@@ -181,6 +183,102 @@ WHERE rowid = 1'''
             ),
         )
         return ret.fetchone()[0]
+
+    def _get_permission_confusion_pretty_list(
+        self,
+        case_id: int,
+        subject_cid: int,
+        eval_case_id: int,
+        reference_result: int,
+        medusa_result: int,
+    ) -> str:
+        """Pretty-printed list of files with a given confusion."""
+        return read_sql_query(
+            '''WITH RECURSIVE child AS
+  (SELECT accesses.case_id,
+          accesses.node_rowid,
+          accesses.subject_cid,
+          cases.name AS case_name,
+          contexts.name AS subject_context,
+          fs.rowid,
+          fs.parent,
+          fs.name,
+          fs.selinux_user,
+          fs.selinux_role,
+          fs.selinux_type,
+          fs.selinux_category,
+	  fs.selinux_sensitivity,
+          operation,
+          results.reference_result,
+		  medusa_results.eval_case_id,
+		  eval_cases.eval_case,
+          medusa_results.medusa_result
+   FROM accesses
+   JOIN cases ON case_id = cases.rowid
+   JOIN contexts ON subject_cid = contexts.rowid
+   JOIN fs ON node_rowid = fs.rowid
+   LEFT JOIN results ON accesses.ROWID = results.access_id
+   LEFT JOIN operations ON results.operation_id = operations.rowid
+   LEFT JOIN medusa_results ON results.rowid = medusa_results.result_id
+   JOIN eval_cases ON medusa_results.eval_case_id = eval_cases.rowid
+   WHERE case_id = ? AND subject_cid = ? AND eval_case_id = ? AND reference_result = ? AND medusa_result = ?
+   UNION ALL SELECT case_id,
+                    node_rowid,
+                    subject_cid,
+                    case_name,
+                    subject_context,
+                    fs.rowid,
+                    fs.parent,
+                    fs.name || '/' || child.name,
+                    child.selinux_user,
+                    child.selinux_role,
+                    child.selinux_type,
+                    child.selinux_category,
+                    child.selinux_sensitivity,
+                    operation,
+                    reference_result,
+		    eval_case_id,
+		    eval_case,
+                    medusa_result
+   FROM fs,
+        child
+   WHERE child.parent = fs.rowid )
+SELECT subject_context, name, operation, selinux_user || ':' || selinux_role || ':' || selinux_type || ':' || selinux_sensitivity || COALESCE(':' || selinux_category, '') AS object_context, reference_result, medusa_result
+FROM child
+WHERE rowid = 1''',
+            self.con,
+            params=(
+                case_id,
+                subject_cid,
+                eval_case_id,
+                reference_result,
+                medusa_result,
+            ),
+        )
+
+    def print_confusion(
+        self,
+        case: str,
+        contexts: Iterable[str],
+        eval_case: str,
+        confusion: str,
+        f: TextIO,
+    ) -> None:
+        case_id = self.get_case_id(case)
+        subject_cids = [self.get_context_id(context) for context in contexts]
+        eval_case_id = self.get_eval_case(eval_case)
+        confusion_table = {
+            'hit': (1, 1),
+            'correct denial': (0, 0),
+            'overpermission': (0, 1),
+            'underpermission': (1, 0),
+        }
+        confusion = confusion_table[confusion]
+        for subject_cid in subject_cids:
+            out = self._get_permission_confusion_pretty_list(
+                case_id, subject_cid, eval_case_id, *confusion
+            )
+            print(out.to_string(), file=f)
 
     def get_permission_confusion(
         self, case: str, contexts: Iterable[str], eval_case: str
