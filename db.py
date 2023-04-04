@@ -20,6 +20,7 @@ from itertools import chain
 from pprint import pprint
 from pandas import read_sql_query
 from typing import TextIO
+from .evaluation import Result
 
 
 Inode = namedtuple(
@@ -296,7 +297,7 @@ WHERE rowid = 1''',
             ]
             for subject_cid in subject_cids
         ]
-        return tuple(sum(x) for x in zip(*ret))
+        return Result(*(sum(x) for x in zip(*ret)))
 
     def is_directory(self, path: str) -> bool:
         """Return `True` if `path` points to a directory.
