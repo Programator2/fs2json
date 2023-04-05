@@ -279,7 +279,7 @@ WHERE rowid = 1''',
             out = self._get_permission_confusion_pretty_list(
                 case_id, subject_cid, eval_case_id, *confusion
             )
-            print(out.to_string(), file=f)
+            print(out.to_string(index=False), file=f)
 
     def get_permission_confusion(
         self, case: str, contexts: Iterable[str], eval_case: str
