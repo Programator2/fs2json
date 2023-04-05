@@ -21,6 +21,7 @@ from pprint import pprint
 from pandas import read_sql_query
 from typing import TextIO
 from .evaluation import Result
+from pandas.core.api import DataFrame
 
 
 Inode = namedtuple(
@@ -192,7 +193,7 @@ WHERE rowid = 1'''
         eval_case_id: int,
         reference_result: int,
         medusa_result: int,
-    ) -> str:
+    ) -> DataFrame:
         """Pretty-printed list of files with a given confusion."""
         return read_sql_query(
             '''WITH RECURSIVE child AS
