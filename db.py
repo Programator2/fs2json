@@ -284,7 +284,7 @@ WHERE rowid = 1''',
 
     def get_permission_confusion(
         self, case: str, contexts: Iterable[str], eval_case: str
-    ) -> tuple[int, int, int, int]:
+    ) -> Result:
         case_id = self.get_case_id(case)
         subject_cids = [self.get_context_id(context) for context in contexts]
         eval_case_id = self.get_eval_case(eval_case)
