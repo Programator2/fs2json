@@ -903,6 +903,10 @@ WHERE rowid = 1"""
             return None
         return row[0]
 
+    def create_evaluation_table(self):
+        # TODO: Finish
+        pass
+
     def delete_evaluation_part(self):
         """Remove data concerning accesses, results and contexts."""
         self.cur.executemany(
