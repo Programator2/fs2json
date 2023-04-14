@@ -903,6 +903,16 @@ WHERE rowid = 1"""
             return None
         return row[0]
 
+    def delete_evaluation_part(self):
+        """Remove data concerning accesses, results and contexts."""
+        self.cur.executemany(
+            '''DELETE FROM accesses;
+               DELETE FROM contexts;
+               DELETE FROM medusa_results;
+               DELETE FROM eval_cases;
+               DELETE FROM results;'''
+        )
+
     def close(self):
         """Commit and close the database file."""
         self.con.commit()
