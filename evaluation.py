@@ -68,8 +68,55 @@ class Result:
 
     def summary(self) -> str:
         return f'''hits={self.tp} correct denials={self.tn} overpermission={self._fp} underpermission={self.fn}
-precision={self.precision():.2} sensitivity={self.sensitivity():.2}
-f1={self.f1():.2} f2={self.f2():.2} fm={self.fm():.2} csi={self.jaccard_index():.2}'''
+precision={self.precision():.3} sensitivity={self.sensitivity():.3}
+f1={self.f1():.3} f2={self.f2():.3} fm={self.fm():.3} csi={self.jaccard_index():.3}'''
+
+    @staticmethod
+    def summary_csv_header() -> str:
+        """Return header line for csv file."""
+        return 'generalization,hits,correct denials,overpermission,underpermission,precision,sensitivity,f1,f2,fm,csi\n'
+
+    def summary_csv_line(self, generalization: str) -> str:
+        """Return summary as a csv line."""
+        return f'{generalization},{self.tp},{self.tn},{self._fp},{self.fn},{self.precision():.4},{self.sensitivity():.4},{self.f1():.4},{self.f2():.4},{self.fm():.4},{self.jaccard_index():.4}\n'
+
+    @staticmethod
+    def summary_tabular_full_header() -> str:
+        return r'''\begin{table}[htbp]
+  \caption{}
+  \label{tab:}
+  \centering
+  \begin{tabular}[h]{@{}lrrrrrrrrrr@{}}
+    \toprule
+    Generalization & TP & TN & FP & FN & PPV & SEN & \(F_1\) & \(F_2\) & FM & CSI \\
+    \midrule
+'''
+
+    @staticmethod
+    def summary_tabular_footer() -> str:
+        return '''    \\bottomrule
+  \\end{tabular}
+\\end{table}\n'''
+
+    def summary_tabular_full_line(self, generalization: str) -> str:
+        """Return summary as a csv line."""
+        return f'{generalization}\t&\t{self.tp}\t&\t{self.tn}\t&\t{self._fp}\t&\t{self.fn}\t&\t{self.precision():.4}\t&\t{self.sensitivity():.4}\t&\t{self.f1():.4}\t&\t{self.f2():.4}\t&\t{self.fm():.4}\t&\t{self.jaccard_index():.4} \\\\\n'
+
+    @staticmethod
+    def summary_tabular_short_header() -> str:
+        return r'''\begin{table}[htbp]
+  \caption{}
+  \label{tab:}
+  \centering
+  \begin{tabular}[h]{@{}lrrr@{}}
+    \toprule
+    Generalization & \(F_2\) & SEN & PPV \\
+    \midrule
+'''
+
+    def summary_tabular_short_line(self, generalization: str) -> str:
+        """Return summary as a csv line."""
+        return f'{generalization}\t&\t{self.sensitivity():.4}\t&\t{self.precision():.4}\t&\t{self.f2():.4} \\\\\n'
 
     def __repr__(self) -> str:
         return f'Result({self.tp}, {self.tn}, {self._fp}, {self._fn})'
