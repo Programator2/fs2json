@@ -261,13 +261,16 @@ WHERE rowid = 1''',
     def print_confusion(
         self,
         case: str,
-        contexts: Iterable[str],
+        subject_context_groups: Iterable[Iterable[str]],
         eval_case: str,
         confusion: str,
         f: TextIO,
     ) -> None:
         case_id = self.get_case_id(case)
-        subject_cids = [self.get_context_id(context) for context in contexts]
+        subject_cids = [
+            self.get_context_id(context)
+            for context in chain.from_iterable(subject_context_groups)
+        ]
         eval_case_id = self.get_eval_case(eval_case)
         confusion_table = {
             'hit': (1, 1),
@@ -283,10 +286,16 @@ WHERE rowid = 1''',
             print(out.to_string(index=False), file=f)
 
     def get_permission_confusion(
-        self, case: str, contexts: Iterable[str], eval_case: str
+        self,
+        case: str,
+        subject_context_groups: Iterable[Iterable[str]],
+        eval_case: str,
     ) -> Result:
         case_id = self.get_case_id(case)
-        subject_cids = [self.get_context_id(context) for context in contexts]
+        subject_cids = [
+            self.get_context_id(context)
+            for context in chain.from_iterable(subject_context_groups)
+        ]
         eval_case_id = self.get_eval_case(eval_case)
         results = ((1, 1), (0, 0), (0, 1), (1, 0))
         ret = [
