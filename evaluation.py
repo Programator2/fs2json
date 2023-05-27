@@ -110,7 +110,7 @@ f1={self.f1():.3} f2={self.f2():.3} fm={self.fm():.3} csi={self.jaccard_index():
   \centering
   \begin{tabular}[h]{@{}lrrr@{}}
     \toprule
-    Generalization & \(F_2\) & SEN & PPV \\
+    Generalization & SEN & PPV & \(F_2\) \\
     \midrule
 '''
 
